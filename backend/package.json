@@ -1,0 +1,30 @@
+{
+  "name": "smart-abarrotes-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "typeorm": "bun ./node_modules/typeorm/cli.js",
+    "db:migrate": "bun run typeorm migration:run -d src/infrastructure/database/data-source.ts",
+    "db:revert": "bun run typeorm migration:revert -d src/infrastructure/database/data-source.ts",
+    "db:generate": "bun run typeorm migration:generate -d src/infrastructure/database/data-source.ts",
+    "db:show": "bun run typeorm migration:show -d src/infrastructure/database/data-source.ts"
+  },
+  "dependencies": {
+    "@elysiajs/jwt": "^1.4.2",
+    "@elysiajs/swagger": "^1.3.1",
+    "@sinclair/typebox": "^0.34.52",
+    "elysia": "^1.4",
+    "pg": "^8.23.1",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^1.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5"
+  }
+}

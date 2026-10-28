@@ -1,0 +1,1046 @@
+openapi: 3.1.0
+info:
+  title: Smart Abarrotes API
+  version: 1.0.0
+  description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
+servers:
+  - url: http://localhost:3000/api/v1
+tags:
+  - { name: Health }
+  - { name: Auth }
+  - { name: Customer, description: Portal del cliente (PWA) }
+  - { name: Store Devices, description: Escáner de entrada y sistema de cámaras }
+  - { name: Categories }
+  - { name: Products }
+  - { name: Inventory }
+  - { name: Sales }
+  - { name: Reports }
+  - { name: Settings }
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      security: []
+      tags: [Health]
+      summary: Liveness/readiness
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  db: { type: string, enum: [up, down] }
+
+  # ---------------- AUTH ----------------
+  /auth/register:
+    post:
+      operationId: registerCustomer
+      security: []
+      tags: [Auth]
+      summary: Registro de cliente (rol CUSTOMER)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Usuario creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /auth/login:
+    post:
+      operationId: loginCustomer
+      security: []
+      tags: [Auth]
+      summary: Login de cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/admin/login:
+    post:
+      operationId: loginAdmin
+      security: []
+      tags: [Auth]
+      summary: Login exclusivo de propietario (rechaza CUSTOMER con 403)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [Auth]
+      summary: Usuario autenticado
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------- CUSTOMER ----------------
+  /me/entry-pass:
+    get:
+      operationId: getEntryPass
+      tags: [Customer]
+      summary: Genera el JWT de pase de entrada para el QR (TTL 60 s, un solo uso)
+      security: [{ bearerAuth: [CUSTOMER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntryPass' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/purchases:
+    get:
+      operationId: listMyPurchases
+      tags: [Customer]
+      summary: Historial de compras agrupado por fecha
+      security: [{ bearerAuth: [CUSTOMER] }]
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseHistory' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /me/purchases/{saleId}:
+    get:
+      operationId: getMyPurchase
+      tags: [Customer]
+      summary: Detalle de una compra propia
+      security: [{ bearerAuth: [CUSTOMER] }]
+      parameters:
+        - { name: saleId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------- STORE DEVICES ----------------
+  /store/entry:
+    post:
+      operationId: registerStoreEntry
+      tags: [Store Devices]
+      summary: El escáner valida el QR y abre una visita
+      security: [{ deviceKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoreEntryRequest' }
+      responses:
+        '201':
+          description: Visita creada (abrir acceso)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreEntryResponse' }
+        '401': { description: Token inválido/expirado o device key inválida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Token ya utilizado (ENTRY_TOKEN_REUSED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /webhooks/checkout:
+    post:
+      operationId: handleCheckoutWebhook
+      tags: [Store Devices]
+      summary: Webhook de salida del sistema de cámaras → venta AUTOMATED + cobro + descuento de stock
+      description: |
+        Firma: `X-Signature: sha256=<hex(HMAC_SHA256(WEBHOOK_SECRET, rawBody))>`.
+        Idempotente por `eventId`: un reintento devuelve la misma venta con 200.
+        Si `items` está vacío se cierra la visita sin venta (`saleId: null`).
+      security: [{ webhookSignature: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CheckoutWebhookRequest' }
+      responses:
+        '200':
+          description: Procesado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CheckoutWebhookResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: Firma inválida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Visita o producto desconocido, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Visita ya cerrada con otro eventId, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ---------------- CATEGORIES ----------------
+  /categories:
+    get:
+      operationId: listCategories
+      summary: Lista categorías
+      tags: [Categories]
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Category' } }
+    post:
+      operationId: createCategory
+      summary: Crea categoría
+      tags: [Categories]
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '201':
+          description: Creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /categories/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateCategory
+      summary: Edita categoría
+      tags: [Categories]
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      operationId: deleteCategory
+      tags: [Categories]
+      summary: Elimina categoría (409 si tiene productos)
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '204': { description: Eliminada }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # ---------------- PRODUCTS ----------------
+  /products:
+    get:
+      operationId: listProducts
+      tags: [Products]
+      summary: Lista paginada con búsqueda y filtros (tabla de inventario y catálogo POS)
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: search, in: query, schema: { type: string }, description: 'Nombre, SKU o código de barras' }
+        - { name: categoryId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ProductStatus' } }
+        - { name: lowStock, in: query, schema: { type: boolean }, description: 'stock <= min_stock_alert' }
+        - { name: quickAccess, in: query, schema: { type: boolean }, description: Solo productos del grid del POS }
+        - { name: sort, in: query, schema: { type: string, enum: [name, -name, stock, -stock, price, -price, updatedAt, -updatedAt], default: name } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Product' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+    post:
+      operationId: createProduct
+      summary: Crea producto
+      tags: [Products]
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductCreate' }
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /products/lookup:
+    get:
+      operationId: lookupProduct
+      tags: [Products]
+      summary: Búsqueda exacta por código de barras o SKU (lector del POS)
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /products/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }, description: SKU }
+    get:
+      operationId: getProduct
+      summary: Detalle de producto
+      tags: [Products]
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateProduct
+      tags: [Products]
+      summary: Edita producto (el stock NO se edita aquí; usar stock-adjustments)
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteProduct
+      tags: [Products]
+      summary: Baja lógica (soft delete; conserva historial de ventas)
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '204': { description: Eliminado }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /products/{id}/stock-adjustments:
+    post:
+      operationId: createStockAdjustment
+      tags: [Inventory]
+      summary: Entrada de mercancía o ajuste manual de stock
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockAdjustmentRequest' }
+      responses:
+        '201':
+          description: Movimiento registrado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventoryMovement' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------- INVENTORY ----------------
+  /inventory/summary:
+    get:
+      operationId: getInventorySummary
+      tags: [Inventory]
+      summary: KPIs del dashboard de inventario
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventorySummary' }
+  /inventory/movements:
+    get:
+      operationId: listInventoryMovements
+      tags: [Inventory]
+      summary: Kardex / auditoría de movimientos
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: productId, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/MovementType' } }
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/InventoryMovement' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+
+  # ---------------- SALES ----------------
+  /sales:
+    get:
+      operationId: listSales
+      tags: [Sales]
+      summary: Historial cronológico de tickets
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { $ref: '#/components/parameters/From' }
+        - { $ref: '#/components/parameters/To' }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/SaleType' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/SaleStatus' } }
+        - { name: paymentMethod, in: query, schema: { $ref: '#/components/schemas/PaymentMethod' } }
+        - { name: folio, in: query, schema: { type: integer } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK (orden date_time DESC)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/SaleSummary' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+    post:
+      operationId: createManualSale
+      tags: [Sales]
+      summary: Venta MANUAL desde el POS (precios e impuestos recalculados en servidor)
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: Idempotency-Key, in: header, required: false, schema: { type: string, format: uuid }, description: Evita doble cobro por doble clic }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ManualSaleRequest' }
+      responses:
+        '201':
+          description: Venta registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: INSUFFICIENT_STOCK o PRODUCT_INACTIVE, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'CASH_INSUFFICIENT (cashReceived < total)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /sales/{id}:
+    get:
+      operationId: getSale
+      summary: Detalle de venta
+      tags: [Sales]
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /sales/{id}/receipt:
+    get:
+      operationId: getSaleReceipt
+      tags: [Sales]
+      summary: Datos del ticket para (re)impresión
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /sales/{id}/cancel:
+    post:
+      operationId: cancelSale
+      tags: [Sales]
+      summary: Cancela la venta completa, repone stock y reembolsa (CARD_ON_FILE vía gateway)
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelSaleRequest' }
+      responses:
+        '200':
+          description: Cancelada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: SALE_ALREADY_CANCELLED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ---------------- REPORTS ----------------
+  /reports/summary:
+    get:
+      operationId: getReportSummary
+      tags: [Reports]
+      summary: Métricas clave en un rango (el dashboard pide hoy y semana)
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { $ref: '#/components/parameters/FromRequired' }
+        - { $ref: '#/components/parameters/ToRequired' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportSummary' }
+  /reports/sales-trend:
+    get:
+      operationId: getSalesTrend
+      summary: Serie temporal de ventas y ganancia
+      tags: [Reports]
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { $ref: '#/components/parameters/FromRequired' }
+        - { $ref: '#/components/parameters/ToRequired' }
+        - { name: granularity, in: query, schema: { type: string, enum: [hour, day, week, month], default: day } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TrendPoint' } }
+  /reports/top-products:
+    get:
+      operationId: getTopProducts
+      tags: [Reports]
+      summary: Productos de mayor rotación
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { $ref: '#/components/parameters/FromRequired' }
+        - { $ref: '#/components/parameters/ToRequired' }
+        - { name: by, in: query, schema: { type: string, enum: [quantity, revenue, profit], default: quantity } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TopProduct' } }
+
+  # ---------------- SETTINGS ----------------
+  /settings:
+    get:
+      operationId: getSettings
+      summary: Configuración general del negocio
+      tags: [Settings]
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreSettings' }
+    patch:
+      operationId: updateSettings
+      summary: Actualiza configuración general
+      tags: [Settings]
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoreSettingsUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreSettings' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'JWT de sesión (HS256, TTL 8h). Claims: sub, role. Los scopes [OWNER]/[CUSTOMER] indican el rol requerido.'
+    deviceKey:
+      type: apiKey
+      in: header
+      name: X-Device-Key
+    webhookSignature:
+      type: apiKey
+      in: header
+      name: X-Signature
+
+  parameters:
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    From: { name: from, in: query, schema: { type: string, format: date-time } }
+    To: { name: to, in: query, schema: { type: string, format: date-time } }
+    FromRequired: { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+    ToRequired: { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+
+  responses:
+    BadRequest: { description: Validación fallida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Unauthorized: { description: No autenticado, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: Rol insuficiente, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Recurso no encontrado, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Conflict: { description: Conflicto (duplicado / estado inválido), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  schemas:
+    Money: { type: number, multipleOf: 0.01, minimum: 0 }
+    TaxRate: { type: number, minimum: 0, maximum: 1, examples: [0, 0.16] }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, examples: [VALIDATION_ERROR, INSUFFICIENT_STOCK, ENTRY_TOKEN_REUSED] }
+            message: { type: string }
+            details: {}
+            traceId: { type: string, description: Trace ID de OpenTelemetry }
+    PaginationMeta:
+      type: object
+      required: [page, limit, total]
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+
+    Role: { type: string, enum: [OWNER, CUSTOMER] }
+    User:
+      type: object
+      required: [id, name, email, role, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        createdAt: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    AuthResponse:
+      type: object
+      required: [accessToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        expiresIn: { type: integer, description: segundos }
+        user: { $ref: '#/components/schemas/User' }
+    EntryPass:
+      type: object
+      required: [token, expiresAt, refreshInSeconds]
+      properties:
+        token: { type: string, description: 'JWT {sub, typ:"entry", jti, iat, exp}' }
+        expiresAt: { type: string, format: date-time }
+        refreshInSeconds: { type: integer, examples: [45] }
+
+    StoreEntryRequest:
+      type: object
+      required: [token, gateId]
+      properties:
+        token: { type: string }
+        gateId: { type: string }
+    StoreEntryResponse:
+      type: object
+      required: [visitId, user, enteredAt]
+      properties:
+        visitId: { type: string, format: uuid }
+        user:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        enteredAt: { type: string, format: date-time }
+    CheckoutWebhookRequest:
+      type: object
+      required: [eventId, visitId, exitedAt, items]
+      properties:
+        eventId: { type: string, description: ID único del evento del proveedor de cámaras }
+        visitId: { type: string, format: uuid }
+        exitedAt: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            required: [quantity]
+            properties:
+              productId: { type: string, description: SKU (o usar barcode) }
+              barcode: { type: string }
+              quantity: { type: integer, minimum: 1 }
+    CheckoutWebhookResponse:
+      type: object
+      required: [visitId, saleId]
+      properties:
+        visitId: { type: string, format: uuid }
+        saleId: { type: [string, 'null'], format: uuid }
+        folio: { type: [integer, 'null'] }
+        totalAmount: { $ref: '#/components/schemas/Money' }
+        paymentStatus: { $ref: '#/components/schemas/PaymentStatus' }
+
+    Category:
+      type: object
+      required: [id, name, color, sortOrder]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        icon: { type: [string, 'null'] }
+        sortOrder: { type: integer }
+    CategoryInput:
+      type: object
+      required: [name, color]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        icon: { type: [string, 'null'] }
+        sortOrder: { type: integer, default: 0 }
+
+    ProductStatus: { type: string, enum: [ACTIVE, INACTIVE, DISCONTINUED] }
+    Product:
+      type: object
+      required: [id, name, price, purchaseCost, taxRate, stock, minStockAlert, status, isLowStock, isQuickAccess]
+      properties:
+        id: { type: string, description: SKU }
+        barcode: { type: [string, 'null'] }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        category: { oneOf: [{ $ref: '#/components/schemas/Category' }, { type: 'null' }] }
+        price: { $ref: '#/components/schemas/Money' }
+        purchaseCost: { $ref: '#/components/schemas/Money' }
+        taxRate: { $ref: '#/components/schemas/TaxRate' }
+        stock: { type: integer }
+        minStockAlert: { type: integer, minimum: 0 }
+        status: { $ref: '#/components/schemas/ProductStatus' }
+        imageUrl: { type: [string, 'null'], format: uri }
+        isQuickAccess: { type: boolean }
+        isLowStock: { type: boolean, description: 'derivado: stock <= minStockAlert' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProductCreate:
+      type: object
+      required: [id, name, categoryId, price, purchaseCost]
+      properties:
+        id: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+        barcode: { type: [string, 'null'], maxLength: 64 }
+        name: { type: string, minLength: 1, maxLength: 150 }
+        description: { type: [string, 'null'] }
+        categoryId: { type: string, format: uuid }
+        price: { $ref: '#/components/schemas/Money' }
+        purchaseCost: { $ref: '#/components/schemas/Money' }
+        taxRate: { $ref: '#/components/schemas/TaxRate', default: 0.16 }
+        initialStock: { type: integer, minimum: 0, default: 0, description: Genera movimiento RESTOCK }
+        minStockAlert: { type: integer, minimum: 0, default: 5 }
+        status: { $ref: '#/components/schemas/ProductStatus', default: ACTIVE }
+        imageUrl: { type: [string, 'null'], format: uri }
+        isQuickAccess: { type: boolean, default: false }
+    ProductUpdate:
+      type: object
+      minProperties: 1
+      description: Todos los campos de ProductCreate excepto id e initialStock, opcionales.
+      properties:
+        barcode: { type: [string, 'null'] }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        categoryId: { type: string, format: uuid }
+        price: { $ref: '#/components/schemas/Money' }
+        purchaseCost: { $ref: '#/components/schemas/Money' }
+        taxRate: { $ref: '#/components/schemas/TaxRate' }
+        minStockAlert: { type: integer, minimum: 0 }
+        status: { $ref: '#/components/schemas/ProductStatus' }
+        imageUrl: { type: [string, 'null'], format: uri }
+        isQuickAccess: { type: boolean }
+
+    MovementType: { type: string, enum: [SALE, CANCELLATION, RESTOCK, ADJUSTMENT] }
+    StockAdjustmentRequest:
+      type: object
+      required: [type, quantity]
+      properties:
+        type: { type: string, enum: [RESTOCK, ADJUSTMENT] }
+        quantity: { type: integer, description: 'RESTOCK > 0; ADJUSTMENT puede ser negativo (merma)', not: { const: 0 } }
+        unitCost: { $ref: '#/components/schemas/Money', description: 'Opcional en RESTOCK: actualiza purchaseCost' }
+        note: { type: string, maxLength: 255 }
+    InventoryMovement:
+      type: object
+      required: [id, productId, type, quantityDelta, stockAfter, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string }
+        type: { $ref: '#/components/schemas/MovementType' }
+        quantityDelta: { type: integer }
+        stockAfter: { type: integer }
+        saleId: { type: [string, 'null'], format: uuid }
+        userId: { type: [string, 'null'], format: uuid }
+        note: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    InventorySummary:
+      type: object
+      required: [totalProducts, totalUnits, totalCostValue, totalRetailValue, lowStockCount, outOfStockCount]
+      properties:
+        totalProducts: { type: integer }
+        totalUnits: { type: integer }
+        totalCostValue: { $ref: '#/components/schemas/Money', description: 'Σ stock × purchaseCost' }
+        totalRetailValue: { $ref: '#/components/schemas/Money', description: 'Σ stock × price' }
+        lowStockCount: { type: integer }
+        outOfStockCount: { type: integer, description: 'stock <= 0' }
+        byCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              categoryId: { type: string, format: uuid }
+              name: { type: string }
+              units: { type: integer }
+              costValue: { $ref: '#/components/schemas/Money' }
+
+    SaleType: { type: string, enum: [AUTOMATED, MANUAL] }
+    PaymentMethod: { type: string, enum: [CASH, CARD, TRANSFER, CARD_ON_FILE] }
+    PaymentStatus: { type: string, enum: [PAID, PENDING, FAILED, REFUNDED] }
+    SaleStatus: { type: string, enum: [COMPLETED, CANCELLED] }
+    SaleItem:
+      type: object
+      required: [id, productId, productName, quantity, unitPrice, taxRate, subtotal]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string }
+        productName: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        unitPrice: { $ref: '#/components/schemas/Money' }
+        taxRate: { $ref: '#/components/schemas/TaxRate' }
+        subtotal: { $ref: '#/components/schemas/Money' }
+    SaleSummary:
+      type: object
+      required: [id, folio, dateTime, saleType, paymentMethod, paymentStatus, status, totalAmount, itemCount]
+      properties:
+        id: { type: string, format: uuid }
+        folio: { type: integer }
+        dateTime: { type: string, format: date-time }
+        saleType: { $ref: '#/components/schemas/SaleType' }
+        paymentMethod: { $ref: '#/components/schemas/PaymentMethod' }
+        paymentStatus: { $ref: '#/components/schemas/PaymentStatus' }
+        status: { $ref: '#/components/schemas/SaleStatus' }
+        totalAmount: { $ref: '#/components/schemas/Money' }
+        itemCount: { type: integer }
+        customer:
+          oneOf:
+            - { type: 'null' }
+            - type: object
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string }
+    SaleDetail:
+      allOf:
+        - { $ref: '#/components/schemas/SaleSummary' }
+        - type: object
+          required: [items, subtotal, taxAmount]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/SaleItem' } }
+            subtotal: { $ref: '#/components/schemas/Money' }
+            taxAmount: { $ref: '#/components/schemas/Money' }
+            cashReceived: { oneOf: [{ $ref: '#/components/schemas/Money' }, { type: 'null' }] }
+            changeGiven: { oneOf: [{ $ref: '#/components/schemas/Money' }, { type: 'null' }] }
+            paymentReference: { type: [string, 'null'] }
+            cashier: { oneOf: [{ type: 'null' }, { type: object, properties: { id: { type: string }, name: { type: string } } }] }
+            cancelledAt: { type: [string, 'null'], format: date-time }
+            cancelReason: { type: [string, 'null'] }
+    ManualSaleRequest:
+      type: object
+      required: [items, paymentMethod]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [productId, quantity]
+            properties:
+              productId: { type: string }
+              quantity: { type: integer, minimum: 1 }
+        paymentMethod: { type: string, enum: [CASH, CARD, TRANSFER] }
+        cashReceived: { $ref: '#/components/schemas/Money', description: Requerido si CASH }
+        paymentReference: { type: string, description: Folio de terminal o transferencia }
+        customerId: { type: [string, 'null'], format: uuid }
+    CancelSaleRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 255 }
+    PurchaseHistory:
+      type: object
+      required: [groups, meta]
+      properties:
+        groups:
+          type: array
+          items:
+            type: object
+            required: [date, totalAmount, sales]
+            properties:
+              date: { type: string, format: date }
+              totalAmount: { $ref: '#/components/schemas/Money' }
+              sales: { type: array, items: { $ref: '#/components/schemas/SaleDetail' } }
+        meta: { $ref: '#/components/schemas/PaginationMeta' }
+    Receipt:
+      type: object
+      required: [business, sale, printedAt]
+      properties:
+        business:
+          type: object
+          properties:
+            name: { type: string }
+            legalName: { type: [string, 'null'] }
+            rfc: { type: [string, 'null'] }
+            address: { type: string }
+            phone: { type: [string, 'null'] }
+            logoUrl: { type: [string, 'null'] }
+            footer: { type: [string, 'null'] }
+        sale: { $ref: '#/components/schemas/SaleDetail' }
+        taxBreakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              rate: { $ref: '#/components/schemas/TaxRate' }
+              base: { $ref: '#/components/schemas/Money' }
+              tax: { $ref: '#/components/schemas/Money' }
+        printedAt: { type: string, format: date-time }
+
+    ReportSummary:
+      type: object
+      required: [from, to, revenue, netProfit, transactions, averageTicket]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        revenue: { $ref: '#/components/schemas/Money', description: 'Σ total_amount (COMPLETED)' }
+        taxCollected: { $ref: '#/components/schemas/Money' }
+        netProfit: { type: number, description: 'Σ base − Σ unit_cost×qty' }
+        transactions: { type: integer }
+        averageTicket: { $ref: '#/components/schemas/Money' }
+        byType:
+          type: object
+          properties:
+            AUTOMATED: { type: object, properties: { revenue: { $ref: '#/components/schemas/Money' }, transactions: { type: integer } } }
+            MANUAL: { type: object, properties: { revenue: { $ref: '#/components/schemas/Money' }, transactions: { type: integer } } }
+        pendingPayments: { $ref: '#/components/schemas/Money', description: 'Σ ventas con paymentStatus FAILED/PENDING' }
+    TrendPoint:
+      type: object
+      required: [bucket, revenue, netProfit, transactions]
+      properties:
+        bucket: { type: string, format: date-time }
+        revenue: { $ref: '#/components/schemas/Money' }
+        netProfit: { type: number }
+        transactions: { type: integer }
+    TopProduct:
+      type: object
+      required: [productId, name, quantity, revenue, netProfit]
+      properties:
+        productId: { type: string }
+        name: { type: string }
+        quantity: { type: integer }
+        revenue: { $ref: '#/components/schemas/Money' }
+        netProfit: { type: number }
+
+    Peripherals:
+      type: object
+      properties:
+        printer:
+          type: object
+          properties:
+            connection: { type: string, enum: [BLUETOOTH, NETWORK, USB, NONE] }
+            address: { type: [string, 'null'], description: 'MAC, IP:puerto o vendorId:productId' }
+            paperWidthMm: { type: integer, enum: [58, 80] }
+        barcodeScanner:
+          type: object
+          properties:
+            mode: { type: string, enum: [KEYBOARD_WEDGE, BLUETOOTH, CAMERA] }
+        cardTerminal:
+          type: object
+          properties:
+            provider: { type: [string, 'null'] }
+            terminalId: { type: [string, 'null'] }
+    StoreSettings:
+      type: object
+      required: [businessName, address, currency, defaultTaxRate, pricesIncludeTax, peripherals]
+      properties:
+        businessName: { type: string }
+        legalName: { type: [string, 'null'] }
+        rfc: { type: [string, 'null'] }
+        address: { type: string }
+        phone: { type: [string, 'null'] }
+        logoUrl: { type: [string, 'null'], format: uri }
+        currency: { type: string, const: MXN }
+        defaultTaxRate: { $ref: '#/components/schemas/TaxRate' }
+        pricesIncludeTax: { type: boolean, const: true }
+        ticketFooter: { type: [string, 'null'] }
+        peripherals: { $ref: '#/components/schemas/Peripherals' }
+        updatedAt: { type: string, format: date-time }
+    StoreSettingsUpdate:
+      type: object
+      minProperties: 1
+      description: Cualquier subconjunto de StoreSettings excepto currency, pricesIncludeTax y updatedAt.
+      properties:
+        businessName: { type: string }
+        legalName: { type: [string, 'null'] }
+        rfc: { type: [string, 'null'] }
+        address: { type: string }
+        phone: { type: [string, 'null'] }
+        logoUrl: { type: [string, 'null'], format: uri }
+        defaultTaxRate: { $ref: '#/components/schemas/TaxRate' }
+        ticketFooter: { type: [string, 'null'] }
+        peripherals: { $ref: '#/components/schemas/Peripherals' }
