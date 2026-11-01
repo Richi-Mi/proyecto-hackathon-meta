@@ -13,6 +13,7 @@
     "db:generate": "bun run typeorm migration:generate -d src/infrastructure/database/data-source.ts",
     "db:show": "bun run typeorm migration:show -d src/infrastructure/database/data-source.ts",
     "db:seed": "bun src/infrastructure/database/seed.ts",
+    "db:prepare": "bun run db:migrate && bun run db:seed",
     "test": "bun test",
     "check:contract": "bun scripts/check-contract.ts",
     "simulate:store": "bun scripts/simulate-store.ts"

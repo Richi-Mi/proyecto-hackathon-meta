@@ -5,7 +5,7 @@ import type { AuthPlugin } from '../plugins/auth.plugin'
 import { errors } from '../schemas/common.schema'
 import { SimulatedVisitSchema } from '../schemas/store.schema'
 
-/** Herramientas de demostración. Solo se montan si NODE_ENV ≠ production (ver `createApp`). */
+/** Herramientas de demostración. Solo se montan si NODE_ENV ≠ production o ENABLE_STORE_SIMULATOR=true (ver `createApp`). */
 export const devRoutes = (auth: AuthPlugin, store: StoreUseCases) =>
   new Elysia({ prefix: '/dev' }).use(auth).post('/simulate-visit', () => store.simulateVisit(), {
     auth: [Role.OWNER],

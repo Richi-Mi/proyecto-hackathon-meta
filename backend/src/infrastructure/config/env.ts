@@ -22,11 +22,16 @@ const EnvSchema = Type.Object({
   WEBHOOK_SECRET: Type.String({ minLength: 32 }),
   /** Pasarela simulada: probabilidad (0–1) de rechazar un cobro, para probar adeudos */
   MOCK_PAYMENT_FAILURE_RATE: Type.Number({ minimum: 0, maximum: 1, default: 0 }),
+  /** Monta `/dev/simulate-visit` también en producción (demo). Fuera de producción siempre está montado. */
+  ENABLE_STORE_SIMULATOR: Type.Boolean({ default: false }),
   /** Cliente que usa el simulador de visitas (el mismo que crea el seed) */
   SEED_CUSTOMER_EMAIL: Type.String({ default: 'cliente@smart-abarrotes.mx' }),
 
   /** Zona IANA de la tienda: los reportes agrupan por día/semana/mes en hora local */
   STORE_TIMEZONE: Type.String({ default: 'America/Mexico_City' }),
+
+  /** Carpeta del build del frontend (`frontend/dist`). Vacía = el servidor solo expone la API. */
+  FRONTEND_DIST: Type.String({ default: '' }),
 
   /** Orígenes permitidos separados por coma */
   CORS_ORIGINS: Type.String({ default: 'http://localhost:5173' }),

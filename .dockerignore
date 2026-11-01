@@ -1,0 +1,13 @@
+# Solo entra a la imagen lo que el Dockerfile copia; esto evita mandar binarios de macOS y secretos
+.git
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/.DS_Store
+docker
+docker-compose.yml
+docs

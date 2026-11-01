@@ -1,7 +1,7 @@
 # Smart Abarrotes — estado del proyecto y siguientes pasos
 
 Documento de traspaso entre sesiones de trabajo. Léelo completo antes de continuar.
-Última actualización: 2026-11-01 (al terminar el **paso 5**: Configuración, `GET/PATCH /settings`). **El contrato está implementado completo.**
+Última actualización: 2026-11-01 (al preparar el **despliegue en Railway**, contrato v1.0.7). **El contrato está implementado completo.**
 
 ---
 
@@ -14,7 +14,7 @@ Sistema de administración y punto de venta para una tienda de abarrotes **híbr
 
 **Forma de trabajo acordada con el usuario:**
 
-- **Spec-Driven Design.** La fuente de verdad es `docs/specs/openapi.yaml`, que va en v1.0.6 y tiene su historial en `docs/specs/CHANGELOG.md`, y `docs/specs/erd.md`. Si la implementación descubre algo, primero se ajusta el contrato (sube versión y CHANGELOG) y después el código.
+- **Spec-Driven Design.** La fuente de verdad es `docs/specs/openapi.yaml`, que va en v1.0.7 y tiene su historial en `docs/specs/CHANGELOG.md`, y `docs/specs/erd.md`. Si la implementación descubre algo, primero se ajusta el contrato (sube versión y CHANGELOG) y después el código.
 - **Paso por paso:** se termina un bloque y **se detiene para que el usuario revise** antes del siguiente.
 - **Comunicación en español.** **No hacer commits** salvo que el usuario lo pida. El último commit del usuario es `e5c2eca Bloque 3 terminado`; los pasos 1–5 están sin commitear.
 - **Nunca escribir contraseñas en el chat.** Están en `backend/.env`.
@@ -35,6 +35,7 @@ frontend/  React 19 + Vite 8 + TS 7 + Tailwind v4 + Shadcn (radix-nova) + React 
   src/features/{auth,customer,admin,shelfsight}/   pantallas por portal (shelfsight = landing pública)
   src/lib/api/schema.d.ts   tipos GENERADOS del contrato (bun run gen:api) — no editar a mano
   src/components/ticket/TicketView.tsx  ticket compartido (POS, reimpresión, cliente)
+Dockerfile, railway.json, .dockerignore   despliegue en Railway (1 servicio: API + frontend) → docs/DEPLOY-RAILWAY.md
 docker-compose.yml  postgres:18 + otel-collector + jaeger (UI en :16686)
 docs/specs/         openapi.yaml, erd.md, architecture.md, CHANGELOG.md
 ```
@@ -79,7 +80,7 @@ bunx --bun @redocly/cli@1 lint docs/specs/openapi.yaml     # desde la raíz
 
 | Etapa | Contenido |
 |---|---|
-| Especificación | OpenAPI + ERD + arquitectura; documentado en Notion (página "Hackathon Meta", **todavía con el contrato v1.0.0**) |
+| Especificación | OpenAPI + ERD + arquitectura; documentado en Notion (página "Hackathon Meta", **actualizada al 2026-11-01 con el contrato v1.0.6**: estado, decisiones de implementación, ERD, CHANGELOG, YAML completo y `openapi.yaml` adjunto) |
 | Bloques 1–2 | Entidades/migraciones, auth (argon2id + JWT), categorías, productos, inventario (ajustes, kardex, resumen), errores uniformes, OTel, Swagger, seed |
 | Bloque 3 | Frontend base: PWA, router por portal (sesión separada cliente/admin), layouts, login/registro |
 | Landing | `/` = landing de ShelfSight (PR #1, Motion), con los colores del sistema (tokens `--sf-*` derivados de `index.css`); `/shelfsight` redirige a `/`. La landing anterior (Anime.js) se eliminó |
@@ -89,6 +90,7 @@ bunx --bun @redocly/cli@1 lint docs/specs/openapi.yaml     # desde la raíz
 | Paso 3 | `/me/purchases(/{id})`, `GET /sales`, `/sales/{id}/receipt`, `POST /sales/{id}/cancel` + pantallas Mis compras e Historial de ventas |
 | Paso 4 | Flujo automático: `POST /store/entry`, `POST /webhooks/checkout`, pasarela simulada, reembolso al cancelar, `POST /dev/simulate-visit`, `simulate:store`, botón "Simular visita" en el dashboard, Mis compras se refresca al volver a la app |
 | Paso 5 | `GET/PATCH /settings` (contrato v1.0.6) + pantalla Configuración: perfil del negocio, IVA por defecto, pie del ticket, periféricos, vista previa del ticket y prueba de impresora (ESC/POS por WebUSB / Web Bluetooth, o diálogo del navegador) |
+| Despliegue | Railway con 1 servicio + Postgres (contrato v1.0.7, solo documentación): `Dockerfile` en la raíz (compila el frontend; el backend lo sirve con `FRONTEND_DIST`), `railway.json` (pre-deploy `bun run db:prepare` = migraciones + seed idempotente; healthcheck `/api/v1/health`), `ENABLE_STORE_SIMULATOR=true` monta `/dev` en producción y muestra el botón. Guía: `docs/DEPLOY-RAILWAY.md` |
 
 `bun run check:contract` reporta: **34 operaciones sin diferencias, 0 pendientes**.
 
@@ -115,12 +117,12 @@ bunx --bun @redocly/cli@1 lint docs/specs/openapi.yaml     # desde la raíz
 
 ## 5. SIGUIENTE: a elegir por el usuario
 
-El contrato quedó implementado completo. Opciones (sección 6): revisión visual de los pasos 4 y 5, actualizar Notion, commits por etapa o las mejoras menores.
+El contrato quedó implementado completo. Opciones (sección 6): desplegar en Railway siguiendo `docs/DEPLOY-RAILWAY.md`, revisión visual de los pasos 4 y 5 y de la landing, commits por etapa o las mejoras menores.
 
 ## 6. Otros pendientes
 
-1. **Revisión visual de los pasos 4 y 5** por el usuario: botón "Simular visita" del dashboard (toast + recarga de KPIs), Mis compras en la PWA y la pantalla Configuración (vista previa del ticket a 58/80 mm, prueba de impresora con hardware real).
-2. **Actualizar Notion** (página "Hackathon Meta", vía el conector MCP) con el contrato vigente y el CHANGELOG.
+1. **Revisión visual de los pasos 4 y 5 y de la landing** por el usuario: botón "Simular visita" del dashboard (toast + recarga de KPIs), Mis compras en la PWA, la pantalla Configuración (vista previa del ticket a 58/80 mm, prueba de impresora con hardware real) y la landing de ShelfSight con los colores del sistema.
+2. **Mantener Notion al día** (está en v1.0.6; falta subir la v1.0.7 del despliegue): si el contrato cambia, actualizar la página "Hackathon Meta" (estado, CHANGELOG, bloques YAML y el adjunto `openapi.yaml`). El YAML va en dos bloques (antes y desde `components:`) y, por tamaño, se sube en llamadas separadas.
 3. **Commits por etapa**, cuando el usuario lo pida.
 4. **Mejoras menores:**
    - el bundle principal del frontend pesa ~174 KB gzip y se puede dividir en chunks;
@@ -139,4 +141,5 @@ El contrato quedó implementado completo. Opciones (sección 6): revisión visua
 - **Pruebas:** la BD de pruebas debe llamarse `*_test` (`tests/setup.ts` la borra y la recrea). Para datos aislados se usan fechas fijas en el pasado o SKUs propios del bloque de pruebas.
 - **Webhook firmado en Elysia:** la ruta usa `parse: 'text'` para tener el cuerpo crudo; la firma se verifica antes de `JSON.parse` y el esquema se valida a mano con `Value.Check` (los formatos `uuid`/`date-time` ya los registra Elysia). Los tipos de `detail.requestBody` son de OpenAPI 3.0: el esquema TypeBox se pasa con `as never`.
 - **Rutas solo de desarrollo:** `config.devTools` monta `/dev/*`; `check-contract.ts` y las pruebas lo activan para comparar contra el contrato.
+- **Frontend servido por el backend** (`plugins/static-frontend.ts`): un comodín `/*` que pierde contra las rutas del API y Swagger; `/api/*` inexistente sigue dando el 404 JSON, un archivo inexistente con extensión da 404 y lo demás recibe `index.html`. `/assets/*` con caché inmutable; `index.html`, `sw.js` y el manifest con `no-cache`.
 - **Errores del API:** `{ error: { code, message, details?, traceId? } }`. El frontend asigna `code` y `details[].path` a los campos del formulario (`features/admin/inventory/form-errors.ts`).

@@ -12,6 +12,7 @@ import type { SettingsUseCases } from '../../application/settings/settings.use-c
 import type { StoreUseCases } from '../../application/store/store.use-cases'
 import { createAuthPlugin } from './plugins/auth.plugin'
 import { errorHandler } from './plugins/error-handler'
+import { staticFrontend } from './plugins/static-frontend'
 import { authRoutes } from './routes/auth.routes'
 import { categoryRoutes } from './routes/category.routes'
 import { customerRoutes } from './routes/customer.routes'
@@ -41,8 +42,10 @@ export interface AppDependencies {
     jwtSecret: string
     jwtExpiresInSeconds: number
     corsOrigins: string[]
-    /** Monta `/dev/*` (simulador de visitas). Nunca en producción. */
+    /** Monta `/dev/*` (simulador de visitas): fuera de producción o con `ENABLE_STORE_SIMULATOR=true`. */
     devTools?: boolean
+    /** Carpeta del build del frontend; si se indica, el servidor también sirve la SPA. */
+    staticDir?: string
     /** Plugin de OpenTelemetry; se omite si la telemetría está desactivada. */
     telemetry?: AnyElysia
   }
@@ -75,7 +78,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
         documentation: {
           info: {
             title: 'Smart Abarrotes API',
-            version: '1.0.6',
+            version: '1.0.7',
             description:
               'Endpoints implementados. El contrato completo (fuente de verdad SDD) está en docs/specs/openapi.yaml.',
           },
@@ -90,7 +93,10 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
             { name: 'Reports' },
             { name: 'Settings' },
             { name: 'Store Devices', description: 'Escáner de entrada y sistema de cámaras' },
-            { name: 'Dev', description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production' },
+            {
+              name: 'Dev',
+              description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production o ENABLE_STORE_SIMULATOR=true',
+            },
           ],
           components: {
             securitySchemes: {
@@ -103,6 +109,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
       }),
     )
     .use(api)
+    .use(config.staticDir ? staticFrontend(config.staticDir) : new Elysia({ name: 'static-frontend-disabled' }))
 }
 
 export type App = ReturnType<typeof createApp>

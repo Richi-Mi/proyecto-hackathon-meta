@@ -207,7 +207,7 @@ export interface paths {
         put?: never;
         /**
          * Simula una visita completa del cliente demo (entrada con QR + salida con productos al azar)
-         * @description Solo existe si `NODE_ENV ≠ production`. Usa al cliente `SEED_CUSTOMER_EMAIL`, elige de 1 a 4 productos activos (con stock si los hay)
+         * @description Solo existe si `NODE_ENV ≠ production` o si el servidor arranca con `ENABLE_STORE_SIMULATOR=true` (demo en producción). Usa al cliente `SEED_CUSTOMER_EMAIL`, elige de 1 a 4 productos activos (con stock si los hay)
          *     y ejecuta los mismos casos de uso que `/store/entry` y `/webhooks/checkout`, incluido el cobro simulado.
          *     Errores: 404 `SIMULATION_CUSTOMER_NOT_FOUND` · 422 `NO_PRODUCTS_AVAILABLE`.
          */

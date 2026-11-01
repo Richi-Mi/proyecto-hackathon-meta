@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Smart Abarrotes API
-  version: 1.0.6
+  version: 1.0.7
   description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
 servers:
   - url: http://localhost:3000/api/v1
@@ -16,7 +16,7 @@ tags:
   - { name: Sales }
   - { name: Reports }
   - { name: Settings }
-  - { name: Dev, description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production' }
+  - { name: Dev, description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production o ENABLE_STORE_SIMULATOR=true' }
 
 paths:
   /health:
@@ -230,7 +230,7 @@ paths:
       tags: [Dev]
       summary: Simula una visita completa del cliente demo (entrada con QR + salida con productos al azar)
       description: |
-        Solo existe si `NODE_ENV ≠ production`. Usa al cliente `SEED_CUSTOMER_EMAIL`, elige de 1 a 4 productos activos (con stock si los hay)
+        Solo existe si `NODE_ENV ≠ production` o si el servidor arranca con `ENABLE_STORE_SIMULATOR=true` (demo en producción). Usa al cliente `SEED_CUSTOMER_EMAIL`, elige de 1 a 4 productos activos (con stock si los hay)
         y ejecuta los mismos casos de uso que `/store/entry` y `/webhooks/checkout`, incluido el cobro simulado.
         Errores: 404 `SIMULATION_CUSTOMER_NOT_FOUND` · 422 `NO_PRODUCTS_AVAILABLE`.
       security: [{ bearerAuth: [OWNER] }]

@@ -1,5 +1,11 @@
 # Changelog del contrato (`openapi.yaml`)
 
+## 1.0.7 — 2026-11-01
+
+Despliegue en producción (Railway). Solo documentación; sin cambios en rutas ni esquemas.
+
+- **`POST /dev/simulate-visit`** (tag Dev) también existe en producción si el servidor arranca con `ENABLE_STORE_SIMULATOR=true`, para la demostración del flujo automático. Sigue requiriendo un token de OWNER.
+
 ## 1.0.6 — 2026-11-01
 
 Implementación de `GET /settings` y `PATCH /settings`. Con esto el contrato queda implementado completo. Sin cambios incompatibles para el frontend.
