@@ -1,5 +1,8 @@
+import { motion, useInView } from 'motion/react'
+import { useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { OWNER_FEATURES, SAMPLE_MOVES, SAMPLE_STOCK } from '../content'
+import { EASE_OUT, revealProps } from '../motion-presets'
 import { IconTile, Tag } from './primitives'
 
 const MOVE_TONE = {
@@ -12,10 +15,21 @@ function LowBadge() {
   return <span className="rounded-[4px] bg-(--sf-accent-soft) px-1.5 py-0.5 text-xs font-semibold">Bajo</span>
 }
 
-/** Vista previa de la app del dueño con datos de ejemplo. */
+/** Vista previa de la app del dueño con datos de ejemplo. Los movimientos y el chat llegan en orden. */
 function PhonePreview() {
+  const ref = useRef<HTMLDivElement>(null)
+  const inView = useInView(ref, { once: true, amount: 0.5 })
+  const arrive = (delay: number, x = 0) => ({
+    initial: { opacity: 0, x, y: x ? 0 : 8 },
+    animate: inView ? { opacity: 1, x: 0, y: 0 } : undefined,
+    transition: { delay, duration: 0.4, ease: EASE_OUT },
+  })
+
   return (
-    <div className="sf-lift mx-auto w-full max-w-[330px] rounded-[30px] border border-(--sf-line) bg-(--sf-surface) p-3">
+    <div
+      ref={ref}
+      className="sf-lift mx-auto w-full max-w-[330px] rounded-[30px] border border-(--sf-line) bg-(--sf-surface) p-3"
+    >
       <div className="rounded-[22px] bg-(--sf-bg) p-4">
         <div className="flex items-center justify-between gap-2">
           <p className="sf-wide text-lg">Mi tienda</p>
@@ -38,22 +52,28 @@ function PhonePreview() {
 
         <p className="sf-label mt-4 text-(--sf-muted)">Movimientos</p>
         <ul className="sf-mono sf-num mt-2 grid gap-1.5 text-xs">
-          {SAMPLE_MOVES.map(({ time, delta, kind, text }) => (
-            <li key={time} className="flex gap-2">
+          {SAMPLE_MOVES.map(({ time, delta, kind, text }, index) => (
+            <motion.li key={time} className="flex gap-2" {...arrive(0.2 + index * 0.18, -10)}>
               <span className="text-(--sf-muted)">{time}</span>
               <span className={cn('font-semibold', MOVE_TONE[kind])}>{delta}</span>
               <span className="min-w-0">{text}</span>
-            </li>
+            </motion.li>
           ))}
         </ul>
 
         <div className="mt-4 grid gap-2 text-sm">
-          <p className="ml-8 rounded-[12px] rounded-br-[4px] bg-(--sf-accent-soft) px-3 py-2">
+          <motion.p
+            className="ml-8 rounded-[12px] rounded-br-[4px] bg-(--sf-accent-soft) px-3 py-2"
+            {...arrive(0.9)}
+          >
             ¿Cuántos refrescos de 600 me quedan?
-          </p>
-          <p className="mr-8 rounded-[12px] rounded-bl-[4px] bg-(--sf-surface-2) px-3 py-2">
+          </motion.p>
+          <motion.p
+            className="mr-8 rounded-[12px] rounded-bl-[4px] bg-(--sf-surface-2) px-3 py-2"
+            {...arrive(1.7)}
+          >
             Te quedan 4 en el anaquel 3. Hoy salieron 8.
-          </p>
+          </motion.p>
         </div>
       </div>
     </div>
@@ -72,14 +92,14 @@ export function OwnerSection() {
             <Tag>Lo que ve el dueño</Tag>
             <h2 className="sf-wide sf-h2 mt-5">Existencias al día sin contar nada.</h2>
             <ul className="mt-8 grid gap-6">
-              {OWNER_FEATURES.map(({ icon, title, text }) => (
-                <li key={title} className="flex gap-4">
+              {OWNER_FEATURES.map(({ icon, title, text }, index) => (
+                <motion.li key={title} className="flex gap-4" {...revealProps(index)}>
                   <IconTile icon={icon} />
                   <div className="min-w-0">
                     <h3 className="sf-h3">{title}</h3>
                     <p className="mt-1 text-(--sf-muted)">{text}</p>
                   </div>
-                </li>
+                </motion.li>
               ))}
             </ul>
           </div>

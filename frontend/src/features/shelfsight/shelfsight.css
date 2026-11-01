@@ -210,8 +210,46 @@
   from { top: 6%; }
   to { top: 84%; }
 }
+/* Punto de grabación de la cámara y cursor de la respuesta de Muse Spark */
+.sf-rec-blink {
+  animation: sf-blink 1.6s steps(2, jump-none) infinite;
+}
+.sf-caret {
+  display: inline-block;
+  width: 0;
+  height: 1.1em;
+  margin-right: -2px;
+  vertical-align: text-bottom;
+  border-left: 2px solid var(--sf-accent);
+  animation: sf-blink 0.9s steps(2, jump-none) infinite;
+}
+@keyframes sf-blink {
+  from { opacity: 1; }
+  to { opacity: 0.15; }
+}
+
+/* Indicador de "procesando" del estado del evento */
+.sf-pulse {
+  position: relative;
+}
+.sf-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 2px solid var(--sf-accent);
+  animation: sf-ping 1.2s ease-out infinite;
+}
+@keyframes sf-ping {
+  from { opacity: 0.8; transform: scale(0.6); }
+  to { opacity: 0; transform: scale(1.4); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sf-scan { display: none; }
+  .sf-rec-blink,
+  .sf-caret,
+  .sf-pulse::after { animation: none; }
 }
 
 .sf a:focus-visible,

@@ -195,8 +195,13 @@ export const PLAN_ROWS = [
 ] as const
 
 export const GOALS = [
-  { value: '≥ 95%', text: 'de las interacciones con el anaquel detectadas' },
-  { value: '≥ 90%', text: 'de los eventos resueltos solos, con producto, dirección y cantidad correctos' },
-  { value: '< 15 s', text: 'del evento al inventario actualizado' },
-  { value: '< 5 min', text: 'para configurar un anaquel de 15 productos' },
+  { prefix: '≥ ', value: 95, suffix: '%', text: 'de las interacciones con el anaquel detectadas' },
+  {
+    prefix: '≥ ',
+    value: 90,
+    suffix: '%',
+    text: 'de los eventos resueltos solos, con producto, dirección y cantidad correctos',
+  },
+  { prefix: '< ', value: 15, suffix: ' s', text: 'del evento al inventario actualizado' },
+  { prefix: '< ', value: 5, suffix: ' min', text: 'para configurar un anaquel de 15 productos' },
 ] as const

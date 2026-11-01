@@ -1,5 +1,7 @@
 import { CircleCheck, Hand, Smartphone } from 'lucide-react'
+import { motion } from 'motion/react'
 import { MODELS, PIPELINE_STEPS, PRIVACY, PROBLEMS, SUPPORT_TOOLS } from '../content'
+import { revealProps } from '../motion-presets'
 import { IconTile, SectionIntro, Tag } from './primitives'
 
 const card = 'rounded-[14px] border border-(--sf-line) bg-(--sf-surface)'
@@ -14,12 +16,12 @@ export function ProblemSection() {
           lead="Las tienditas atienden a medio país, pero casi ninguna sabe en este momento cuántas piezas le quedan de cada producto."
         />
         <div className="mt-10 grid gap-5 md:grid-cols-3">
-          {PROBLEMS.map(({ icon, title, text }) => (
-            <article key={title} className={`${card} p-6`}>
+          {PROBLEMS.map(({ icon, title, text }, index) => (
+            <motion.article key={title} {...revealProps(index)} className={`${card} p-6`}>
               <IconTile icon={icon} />
               <h3 className="sf-h3 mt-5">{title}</h3>
               <p className="mt-2 text-(--sf-muted)">{text}</p>
-            </article>
+            </motion.article>
           ))}
         </div>
       </div>
@@ -43,26 +45,26 @@ export function PipelineSection() {
 
         <ol className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {PIPELINE_STEPS.map(({ icon, title, text }, index) => (
-            <li key={title} className={`${card} p-6`}>
+            <motion.li key={title} {...revealProps(index)} className={`${card} p-6`}>
               <div className="flex items-center justify-between">
                 <IconTile icon={icon} />
                 <span className="sf-mono sf-num text-sm text-(--sf-muted)">{index + 1}</span>
               </div>
               <h3 className="sf-h3 mt-5">{title}</h3>
               <p className="mt-2 text-(--sf-muted)">{text}</p>
-            </li>
+            </motion.li>
           ))}
         </ol>
 
         <div className="mt-5 grid gap-5 md:grid-cols-2">
-          <div className={`${card} flex gap-4 p-6`}>
+          <motion.div {...revealProps(0)} className={`${card} flex gap-4 p-6`}>
             <CircleCheck className="mt-0.5 size-6 shrink-0 text-(--sf-entry)" strokeWidth={1.75} aria-hidden />
             <div className="min-w-0">
               <h3 className="sf-h3">Si coinciden</h3>
               <p className="mt-1 text-(--sf-muted)">El inventario se actualiza solo y el movimiento queda en el historial.</p>
             </div>
-          </div>
-          <div className={`${card} flex gap-4 p-6`}>
+          </motion.div>
+          <motion.div {...revealProps(1)} className={`${card} flex gap-4 p-6`}>
             <Hand className="mt-0.5 size-6 shrink-0 text-(--sf-exit)" strokeWidth={1.75} aria-hidden />
             <div className="min-w-0">
               <h3 className="sf-h3">Si no coinciden o hay duda</h3>
@@ -71,7 +73,7 @@ export function PipelineSection() {
                 catálogo como foto de referencia.
               </p>
             </div>
-          </div>
+          </motion.div>
         </div>
       </div>
     </section>
@@ -92,8 +94,12 @@ export function ModelsSection() {
         />
 
         <div className="mt-10 grid gap-5 md:grid-cols-2">
-          {MODELS.map(({ icon, name, role, points }) => (
-            <article key={name} className="rounded-[14px] border border-(--sf-line) bg-(--sf-bg) p-7">
+          {MODELS.map(({ icon, name, role, points }, index) => (
+            <motion.article
+              key={name}
+              {...revealProps(index)}
+              className="rounded-[14px] border border-(--sf-line) bg-(--sf-bg) p-7"
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <IconTile icon={icon} accent />
                 <span className="sf-label rounded-[4px] border border-(--sf-line) px-2 py-1 text-(--sf-muted)">
@@ -110,19 +116,23 @@ export function ModelsSection() {
                   </li>
                 ))}
               </ul>
-            </article>
+            </motion.article>
           ))}
         </div>
 
         <div className="mt-5 grid gap-5 md:grid-cols-2">
-          {SUPPORT_TOOLS.map(({ icon: Icon, title, text }) => (
-            <div key={title} className="flex gap-4 rounded-[14px] border border-(--sf-line) bg-(--sf-bg) p-6">
+          {SUPPORT_TOOLS.map(({ icon: Icon, title, text }, index) => (
+            <motion.div
+              key={title}
+              {...revealProps(index)}
+              className="flex gap-4 rounded-[14px] border border-(--sf-line) bg-(--sf-bg) p-6"
+            >
               <Icon className="mt-0.5 size-6 shrink-0 text-(--sf-muted)" strokeWidth={1.75} aria-hidden />
               <div className="min-w-0">
                 <h3 className="sf-h3">{title}</h3>
                 <p className="mt-1 text-(--sf-muted)">{text}</p>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
@@ -143,12 +153,12 @@ export function PrivacySection() {
             <h2 className="sf-wide sf-h2 mt-5">Cuenta productos, no personas.</h2>
           </div>
           <ul className="grid min-w-0 gap-5 sm:grid-cols-3">
-            {PRIVACY.map(({ icon: Icon, title, text }) => (
-              <li key={title} className="rounded-[14px] bg-(--sf-bg) p-5">
+            {PRIVACY.map(({ icon: Icon, title, text }, index) => (
+              <motion.li key={title} {...revealProps(index)} className="rounded-[14px] bg-(--sf-bg) p-5">
                 <Icon className="size-6" strokeWidth={1.75} aria-hidden />
                 <p className="mt-3 font-semibold">{title}</p>
                 <p className="mt-1 text-sm text-(--sf-muted)">{text}</p>
-              </li>
+              </motion.li>
             ))}
           </ul>
         </div>

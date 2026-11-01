@@ -1,5 +1,7 @@
 import { ArrowDown, CalendarDays, CircleCheck, ScanEye, Sparkles } from 'lucide-react'
+import { motion } from 'motion/react'
 import { NAV_LINKS, SOURCES } from '../content'
+import { EASE_OUT } from '../motion-presets'
 import { HeroShelf } from './ShelfArt'
 import { BrandMark, Tag } from './primitives'
 
@@ -84,7 +86,12 @@ export function ShelfSightHero() {
               <div className="sf-scan" aria-hidden />
             </div>
 
-            <div className="sf-lift relative z-10 mx-3 mt-3 rounded-[12px] border border-(--sf-line) bg-(--sf-surface) p-4 text-(--sf-ink) sm:mr-5 sm:-mt-8 sm:ml-auto sm:w-[20rem]">
+            <motion.div
+              className="sf-lift relative z-10 mx-3 mt-3 rounded-[12px] border border-(--sf-line) bg-(--sf-surface) p-4 text-(--sf-ink) sm:mr-5 sm:-mt-8 sm:ml-auto sm:w-[20rem]"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1.6, duration: 0.5, ease: EASE_OUT }}
+            >
               <p className="sf-label text-(--sf-muted)">Evento · 14:32 · anaquel 3</p>
               <p className="sf-wide mt-1.5 text-xl">
                 <span className="text-(--sf-exit)">−2</span> Refresco cola 600 ml
@@ -103,7 +110,7 @@ export function ShelfSightHero() {
                 <CircleCheck className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
                 Inventario actualizado: quedan 4
               </p>
-            </div>
+            </motion.div>
             <figcaption className="mt-4 text-xs text-(--sf-hero-muted)">
               Ilustración de ejemplo: así marca SAM 3.1 los productos que ve en un anaquel.
             </figcaption>
