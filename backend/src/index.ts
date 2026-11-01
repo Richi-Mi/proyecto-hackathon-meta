@@ -15,6 +15,7 @@ const app = createApp({
     jwtSecret: env.JWT_SECRET,
     jwtExpiresInSeconds: env.JWT_EXPIRES_IN_SECONDS,
     corsOrigins: env.CORS_ORIGINS.split(',').map((origin) => origin.trim()),
+    devTools: env.NODE_ENV !== 'production',
     telemetry: env.OTEL_ENABLED
       ? createTelemetryPlugin({ serviceName: env.OTEL_SERVICE_NAME, otlpEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT })
       : undefined,

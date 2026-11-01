@@ -3,6 +3,7 @@ import type { Category } from '../../domain/models/category'
 import type { InventoryMovement } from '../../domain/models/inventory'
 import { isLowStock, type Product } from '../../domain/models/product'
 import { itemCount, type Sale } from '../../domain/models/sale'
+import type { StoreSettings } from '../../domain/models/store-settings'
 import type { User } from '../../domain/models/user'
 
 // Modelos de dominio → forma exacta del contrato (fechas ISO, campos derivados, sin datos internos).
@@ -54,6 +55,19 @@ export const presentMovement = (movement: InventoryMovement) => ({
   createdAt: movement.createdAt.toISOString(),
 })
 
+export const presentSaleSummary = (sale: Sale) => ({
+  id: sale.id,
+  folio: sale.folio,
+  dateTime: sale.dateTime.toISOString(),
+  saleType: sale.saleType,
+  paymentMethod: sale.paymentMethod,
+  paymentStatus: sale.paymentStatus,
+  status: sale.status,
+  totalAmount: sale.totalAmount,
+  itemCount: itemCount(sale),
+  customer: sale.customer,
+})
+
 export const presentSale = (sale: Sale) => ({
   id: sale.id,
   folio: sale.folio,
@@ -87,4 +101,19 @@ export const presentSale = (sale: Sale) => ({
 export const presentPage =<T, R>(page: Page<T>, present: (item: T) => R) => ({
   data: page.data.map(present),
   meta: page.meta,
+})
+
+export const presentSettings = (settings: StoreSettings) => ({
+  businessName: settings.businessName,
+  legalName: settings.legalName,
+  rfc: settings.rfc,
+  address: settings.address,
+  phone: settings.phone,
+  logoUrl: settings.logoUrl,
+  currency: 'MXN' as const,
+  defaultTaxRate: settings.defaultTaxRate,
+  pricesIncludeTax: true as const,
+  ticketFooter: settings.ticketFooter,
+  peripherals: settings.peripherals,
+  ...(settings.updatedAt && { updatedAt: settings.updatedAt.toISOString() }),
 })

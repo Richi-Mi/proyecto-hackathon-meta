@@ -1,18 +1,34 @@
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import type { RefundRequest } from '../src/application/ports/payment-gateway'
 import { createContainer } from '../src/container'
-import { env } from '../src/infrastructure/config/env'
+import { env, parseList } from '../src/infrastructure/config/env'
 import { AppDataSource } from '../src/infrastructure/database/data-source'
 import { runSeed } from '../src/infrastructure/database/seed'
+import { MockPaymentGateway } from '../src/infrastructure/payments/mock-payment-gateway'
 import { JoseEntryPassSigner } from '../src/infrastructure/security/jose-entry-pass-signer'
+import { HmacWebhookSignatureVerifier } from '../src/infrastructure/security/store-device-auth'
 import { createApp } from '../src/interfaces/http/app'
 
 const OWNER = { name: 'Dueña Pruebas', email: 'owner@test.mx', password: 'owner-password-123' }
 
-const container = createContainer(AppDataSource)
+/** Pasarela simulada que registra los reembolsos y puede rechazarlos a voluntad */
+class SpyPaymentGateway extends MockPaymentGateway {
+  refunds: RefundRequest[] = []
+  rejectRefunds = false
+
+  override async refund(request: RefundRequest) {
+    if (this.rejectRefunds) throw new Error('Reembolso rechazado (prueba)')
+    this.refunds.push(request)
+    return super.refund(request)
+  }
+}
+
+const gateway = new SpyPaymentGateway()
+const container = createContainer(AppDataSource, { paymentGateway: gateway })
 const app = createApp({
   useCases: container.useCases,
   checkDatabase: container.checkDatabase,
-  config: { jwtSecret: env.JWT_SECRET, jwtExpiresInSeconds: 3600, corsOrigins: ['http://localhost:5173'] },
+  config: { jwtSecret: env.JWT_SECRET, jwtExpiresInSeconds: 3600, corsOrigins: ['http://localhost:5173'], devTools: true },
 })
 
 // cuerpo JSON arbitrario en las aserciones
@@ -495,6 +511,650 @@ describe('ventas de mostrador (POST /sales)', () => {
       body: { items: [{ productId: 'VTA-REF', quantity: 1 }], paymentMethod: 'CARD' },
     })
     expect(res.status).toBe(403)
+  })
+})
+
+describe('reportes (/reports/*)', () => {
+  // Ventas fechadas en marzo de 2025 (hora de México, UTC−6) para no mezclarse con las demás pruebas
+  const range = 'from=2025-03-10T00:00:00-06:00&to=2025-03-13T00:00:00-06:00'
+  let cancelledSaleId = ''
+
+  beforeAll(async () => {
+    const reportsCategory = (
+      await call('POST', '/api/v1/categories', { token: ownerToken, body: { name: 'Reportes', color: '#7C3AED' } })
+    ).body.id
+    const product = (id: string, name: string, price: number, purchaseCost: number, taxRate: number) =>
+      call('POST', '/api/v1/products', {
+        token: ownerToken,
+        body: { id, name, categoryId: reportsCategory, price, purchaseCost, taxRate, initialStock: 100 },
+      })
+    await product('REP-A', 'Reporte A', 116, 50, 0.16) // base 100, ganancia 50 por pieza
+    await product('REP-B', 'Reporte B', 30, 20, 0) // base 30, ganancia 10 por pieza
+
+    const ownerId = (await call('GET', '/api/v1/auth/me', { token: ownerToken })).body.id
+    const sell = (at: string, items: { productId: string; quantity: number }[], extra: object = {}) =>
+      container.useCases.sales.createManualSale({ items, paymentMethod: 'CARD', ...extra } as never, ownerId, { at: new Date(at) })
+
+    await sell('2025-03-10T12:00:00-06:00', [{ productId: 'REP-A', quantity: 1 }]) // 116 · ganancia 50
+    // 23:30 en México = 05:30 UTC del día 11: debe contar en el día 10 local
+    await sell('2025-03-10T23:30:00-06:00', [{ productId: 'REP-B', quantity: 3 }]) // 90 · ganancia 30
+    await sell(
+      '2025-03-12T09:00:00-06:00',
+      [
+        { productId: 'REP-A', quantity: 2 },
+        { productId: 'REP-B', quantity: 1 },
+      ],
+      { paymentMethod: 'CASH', cashReceived: 300 },
+    ) // 262 · IVA 32 · ganancia 110 (la venta 1 aporta IVA 16)
+    cancelledSaleId = (await sell('2025-03-12T10:00:00-06:00', [{ productId: 'REP-A', quantity: 5 }])).id
+    await AppDataSource.query(`UPDATE sales SET status = 'CANCELLED' WHERE id = $1`, [cancelledSaleId])
+  })
+
+  test('resumen: ingresos, IVA, ganancia neta y ticket promedio (sin canceladas)', async () => {
+    const res = await call('GET', `/api/v1/reports/summary?${range}`, { token: ownerToken })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      from: '2025-03-10T06:00:00.000Z',
+      to: '2025-03-13T06:00:00.000Z',
+      revenue: 468,
+      taxCollected: 48, // 16 (venta 1) + 32 (venta 3)
+      netProfit: 190,
+      transactions: 3,
+      averageTicket: 156,
+      byType: { MANUAL: { revenue: 468, transactions: 3 }, AUTOMATED: { revenue: 0, transactions: 0 } },
+      pendingPayments: 0,
+    })
+  })
+
+  test('tendencia diaria en hora local, con los días sin ventas en cero', async () => {
+    const res = await call('GET', `/api/v1/reports/sales-trend?${range}&granularity=day`, { token: ownerToken })
+    expect(res.body).toEqual([
+      { bucket: '2025-03-10T06:00:00.000Z', revenue: 206, netProfit: 80, transactions: 2 },
+      { bucket: '2025-03-11T06:00:00.000Z', revenue: 0, netProfit: 0, transactions: 0 },
+      { bucket: '2025-03-12T06:00:00.000Z', revenue: 262, netProfit: 110, transactions: 1 },
+    ])
+  })
+
+  test('tendencia por hora y por semana', async () => {
+    const hourly = await call('GET', `/api/v1/reports/sales-trend?${range}&granularity=hour`, { token: ownerToken })
+    expect(hourly.body).toHaveLength(72)
+    expect(hourly.body.filter((point: Json) => point.transactions > 0).map((point: Json) => point.bucket)).toEqual([
+      '2025-03-10T18:00:00.000Z',
+      '2025-03-11T05:00:00.000Z',
+      '2025-03-12T15:00:00.000Z',
+    ])
+    const weekly = await call('GET', `/api/v1/reports/sales-trend?${range}&granularity=week`, { token: ownerToken })
+    // El lunes 10 de marzo de 2025 abre la semana
+    expect(weekly.body).toEqual([{ bucket: '2025-03-10T06:00:00.000Z', revenue: 468, netProfit: 190, transactions: 3 }])
+  })
+
+  test('productos de mayor rotación según la métrica', async () => {
+    const byQuantity = await call('GET', `/api/v1/reports/top-products?${range}`, { token: ownerToken })
+    expect(byQuantity.body).toEqual([
+      { productId: 'REP-B', name: 'Reporte B', quantity: 4, revenue: 120, netProfit: 40 },
+      { productId: 'REP-A', name: 'Reporte A', quantity: 3, revenue: 348, netProfit: 150 },
+    ])
+    const byRevenue = await call('GET', `/api/v1/reports/top-products?${range}&by=revenue&limit=1`, { token: ownerToken })
+    expect(byRevenue.body.map((p: Json) => p.productId)).toEqual(['REP-A'])
+  })
+
+  test('rangos inválidos y permisos', async () => {
+    const reversed = await call('GET', '/api/v1/reports/summary?from=2025-03-13T00:00:00Z&to=2025-03-10T00:00:00Z', { token: ownerToken })
+    expect([reversed.status, reversed.body.error.code]).toEqual([400, 'INVALID_RANGE'])
+
+    const tooManyHours = await call(
+      'GET',
+      '/api/v1/reports/sales-trend?from=2025-01-01T00:00:00Z&to=2025-03-01T00:00:00Z&granularity=hour',
+      { token: ownerToken },
+    )
+    expect([tooManyHours.status, tooManyHours.body.error.code]).toEqual([400, 'RANGE_TOO_LARGE'])
+
+    expect((await call('GET', '/api/v1/reports/summary?from=ayer&to=hoy', { token: ownerToken })).status).toBe(400)
+    expect((await call('GET', `/api/v1/reports/summary?${range}`, { token: customerToken })).status).toBe(403)
+  })
+})
+
+describe('historiales, ticket y cancelación', () => {
+  const sell = async (body: Record<string, unknown>) =>
+    (await call('POST', '/api/v1/sales', { token: ownerToken, body: { paymentMethod: 'CARD', ...body } })).body
+  const stockOf = async (id: string) => (await call('GET', `/api/v1/products/${id}`, { token: ownerToken })).body.stock
+
+  beforeAll(async () => {
+    const categoryId = (
+      await call('POST', '/api/v1/categories', { token: ownerToken, body: { name: 'Cancelaciones', color: '#DC2626' } })
+    ).body.id
+    for (const [id, price, taxRate] of [['CAN-A', 116, 0.16], ['CAN-B', 30, 0]] as const) {
+      await call('POST', '/api/v1/products', {
+        token: ownerToken,
+        body: { id, name: id, categoryId, price, purchaseCost: 10, taxRate, initialStock: 10 },
+      })
+    }
+  })
+
+  test('el cliente ve solo sus compras, agrupadas por día', async () => {
+    await sell({ items: [{ productId: 'CAN-B', quantity: 1 }], customerId })
+    const res = await call('GET', '/api/v1/me/purchases', { token: customerToken })
+    expect(res.status).toBe(200)
+    const sales = res.body.groups.flatMap((group: Json) => group.sales)
+    expect(sales.length).toBeGreaterThanOrEqual(2)
+    expect(res.body.meta.total).toBe(sales.length)
+    expect(sales.every((sale: Json) => sale.customer?.id === customerId)).toBe(true)
+    for (const group of res.body.groups) expect(group.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+
+    const detail = await call('GET', `/api/v1/me/purchases/${sales[0].id}`, { token: customerToken })
+    expect(detail.body).toMatchObject({ id: sales[0].id, items: expect.any(Array) })
+  })
+
+  test('una compra ajena responde 404 (no revela que existe); el propietario no usa /me', async () => {
+    const anonymous = await sell({ items: [{ productId: 'CAN-B', quantity: 1 }] })
+    const res = await call('GET', `/api/v1/me/purchases/${anonymous.id}`, { token: customerToken })
+    expect([res.status, res.body.error.code]).toEqual([404, 'PURCHASE_NOT_FOUND'])
+    expect((await call('GET', '/api/v1/me/purchases', { token: ownerToken })).status).toBe(403)
+  })
+
+  test('historial del propietario: orden, filtros y paginación', async () => {
+    const all = await call('GET', '/api/v1/sales?limit=100', { token: ownerToken })
+    const times = all.body.data.map((sale: Json) => Date.parse(sale.dateTime))
+    expect(times).toEqual([...times].sort((a, b) => b - a))
+    expect(all.body.data[0]).toEqual(
+      expect.objectContaining({ folio: expect.any(Number), itemCount: expect.any(Number), totalAmount: expect.any(Number) }),
+    )
+    expect(all.body.data[0].items).toBeUndefined() // el resumen no trae partidas
+
+    const folio = all.body.data[3].folio
+    const byFolio = await call('GET', `/api/v1/sales?folio=${folio}`, { token: ownerToken })
+    expect(byFolio.body.data.map((sale: Json) => sale.folio)).toEqual([folio])
+
+    const cancelled = await call('GET', '/api/v1/sales?status=CANCELLED', { token: ownerToken })
+    expect(cancelled.body.data.every((sale: Json) => sale.status === 'CANCELLED')).toBe(true)
+
+    const paged = await call('GET', '/api/v1/sales?limit=2&page=2&type=MANUAL', { token: ownerToken })
+    expect(paged.body.meta).toMatchObject({ page: 2, limit: 2 })
+    expect(paged.body.data).toHaveLength(2)
+
+    const badRange = await call('GET', '/api/v1/sales?from=2026-01-02T00:00:00Z&to=2026-01-01T00:00:00Z', { token: ownerToken })
+    expect(badRange.body.error.code).toBe('INVALID_RANGE')
+  })
+
+  test('ticket para reimprimir: negocio y desglose de IVA por tasa', async () => {
+    const sale = await sell({
+      items: [
+        { productId: 'CAN-A', quantity: 1 },
+        { productId: 'CAN-B', quantity: 1 },
+      ],
+    })
+    const res = await call('GET', `/api/v1/sales/${sale.id}/receipt`, { token: ownerToken })
+    expect(res.status).toBe(200)
+    expect(res.body.business.name).toBe('Smart Abarrotes')
+    expect(res.body.sale.folio).toBe(sale.folio)
+    expect(res.body.taxBreakdown).toEqual([
+      { rate: 0, base: 30, tax: 0 },
+      { rate: 0.16, base: 100, tax: 16 },
+    ])
+    expect(Date.parse(res.body.printedAt)).toBeGreaterThan(0)
+  })
+
+  test('cancelar: repone stock, deja kardex y marca el reembolso', async () => {
+    const before = await stockOf('CAN-A')
+    const sale = await sell({ items: [{ productId: 'CAN-A', quantity: 2 }] })
+    expect(await stockOf('CAN-A')).toBe(before - 2)
+
+    const res = await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: '  Cliente devolvió  ' } })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      status: 'CANCELLED',
+      paymentStatus: 'REFUNDED',
+      cancelReason: 'Cliente devolvió',
+    })
+    expect(Date.parse(res.body.cancelledAt)).toBeGreaterThan(0)
+    expect(await stockOf('CAN-A')).toBe(before)
+
+    const kardex = await call('GET', '/api/v1/inventory/movements?productId=CAN-A&type=CANCELLATION', { token: ownerToken })
+    expect(kardex.body.data[0]).toMatchObject({ quantityDelta: 2, stockAfter: before, saleId: sale.id })
+    expect(kardex.body.data[0].note).toContain(`#${sale.folio}`)
+
+    const again = await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: 'otra vez' } })
+    expect([again.status, again.body.error.code]).toEqual([409, 'SALE_ALREADY_CANCELLED'])
+    expect((await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: 'x' } })).status).toBe(400)
+    expect((await call('POST', `/api/v1/sales/${crypto.randomUUID()}/cancel`, { token: ownerToken, body: { reason: 'nada' } })).status).toBe(404)
+    expect((await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: customerToken, body: { reason: 'mía' } })).status).toBe(403)
+  })
+
+  test('dos cancelaciones simultáneas: solo una procede y el stock se repone una vez', async () => {
+    const before = await stockOf('CAN-B')
+    const sale = await sell({ items: [{ productId: 'CAN-B', quantity: 3 }] })
+    const results = await Promise.all(
+      [1, 2].map(() => call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: 'Duplicada' } })),
+    )
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409])
+    expect(await stockOf('CAN-B')).toBe(before)
+  })
+
+  test('en el historial del cliente la compra cancelada no suma al total del día', async () => {
+    const sale = await sell({ items: [{ productId: 'CAN-A', quantity: 1 }], customerId })
+    await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: 'Error de cobro' } })
+    const res = await call('GET', '/api/v1/me/purchases', { token: customerToken })
+    const group = res.body.groups.find((g: Json) => g.sales.some((s: Json) => s.id === sale.id))
+    const completed = group.sales.filter((s: Json) => s.status === 'COMPLETED').reduce((sum: number, s: Json) => sum + s.totalAmount, 0)
+    expect(group.sales.find((s: Json) => s.id === sale.id).status).toBe('CANCELLED')
+    expect(group.totalAmount).toBeCloseTo(completed, 2)
+  })
+})
+
+describe('flujo automático (Smart Store)', () => {
+  const signer = new JoseEntryPassSigner(env.ENTRY_PASS_SECRET)
+  const webhookSigner = new HmacWebhookSignatureVerifier(env.WEBHOOK_SECRET)
+  const deviceKey = parseList(env.STORE_DEVICE_KEYS)[1]!
+  let shopperToken = ''
+  let shopperId = ''
+
+  const stockOf = async (id: string) => (await call('GET', `/api/v1/products/${id}`, { token: ownerToken })).body.stock
+  const visitStatus = async (id: string) =>
+    ((await AppDataSource.query(`SELECT status FROM store_visits WHERE id = $1`, [id])) as { status: string }[])[0]?.status
+  const pass = async () => (await call('GET', '/api/v1/me/entry-pass', { token: shopperToken })).body.token as string
+
+  const enter = (token: string, key: string | null = deviceKey) =>
+    app
+      .handle(
+        new Request('http://localhost/api/v1/store/entry', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(key !== null && { 'x-device-key': key }) },
+          body: JSON.stringify({ token, gateId: 'ENTRADA-1' }),
+        }),
+      )
+      .then(async (response) => ({ status: response.status, body: (await response.json()) as Json }))
+
+  /** Abre una visita nueva del cliente de este bloque y devuelve su id */
+  const openVisit = async () => {
+    const res = await enter(await pass())
+    expect(res.status).toBe(201)
+    return res.body.visitId as string
+  }
+
+  const webhook = (payload: unknown, signature?: string | null) => {
+    const raw = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    const header = signature === undefined ? webhookSigner.sign(raw) : signature
+    return app
+      .handle(
+        new Request('http://localhost/api/v1/webhooks/checkout', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(header !== null && { 'x-signature': header }) },
+          body: raw,
+        }),
+      )
+      .then(async (response) => ({ status: response.status, body: (await response.json()) as Json }))
+  }
+
+  const checkout = (visitId: string, items: unknown[], eventId: string = crypto.randomUUID()) =>
+    webhook({ eventId, visitId, exitedAt: new Date().toISOString(), items })
+
+  beforeAll(async () => {
+    const categoryId = (
+      await call('POST', '/api/v1/categories', { token: ownerToken, body: { name: 'Smart Store', color: '#0EA5E9' } })
+    ).body.id
+    const product = (id: string, body: Record<string, unknown>) =>
+      call('POST', '/api/v1/products', { token: ownerToken, body: { id, name: id, categoryId, purchaseCost: 10, ...body } })
+    await product('AUT-A', { price: 116, taxRate: 0.16, initialStock: 2 })
+    await product('AUT-B', { price: 30, taxRate: 0, barcode: '2009999000011', initialStock: 50 })
+    await product('AUT-INACTIVO', { price: 10, taxRate: 0.16, initialStock: 1, status: 'INACTIVE' })
+
+    const registered = await call('POST', '/api/v1/auth/register', {
+      body: { name: 'Beto Smart', email: 'beto@smart.mx', password: 'secreta-123' },
+    })
+    shopperToken = registered.body.accessToken
+    shopperId = registered.body.user.id
+  })
+
+  afterAll(() => {
+    gateway.rejectRefunds = false
+  })
+
+  test('al registrarse se vincula el método de pago simulado (sin exponerlo)', async () => {
+    const [row] = await AppDataSource.query(`SELECT payment_customer_ref AS ref FROM users WHERE id = $1`, [shopperId])
+    expect(row.ref).toStartWith('mock_cus_')
+    expect(JSON.stringify((await call('GET', '/api/v1/auth/me', { token: shopperToken })).body)).not.toContain('mock_cus_')
+  })
+
+  test('entrada: QR válido abre la visita; reutilizarlo → 409', async () => {
+    const token = await pass()
+    const res = await enter(token)
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({ user: { id: shopperId, name: 'Beto Smart' } })
+    expect(Date.parse(res.body.enteredAt)).toBeGreaterThan(0)
+    expect(await visitStatus(res.body.visitId)).toBe('ACTIVE')
+
+    const again = await enter(token)
+    expect([again.status, again.body.error.code]).toEqual([409, 'ENTRY_TOKEN_REUSED'])
+    // El intento rechazado no abandona la visita abierta
+    expect(await visitStatus(res.body.visitId)).toBe('ACTIVE')
+  })
+
+  test('entrada: llave de dispositivo y token inválidos → 401; cuenta desactivada → 403', async () => {
+    expect((await enter(await pass(), 'llave-incorrecta-123456')).body.error.code).toBe('INVALID_DEVICE_KEY')
+    expect((await enter(await pass(), null)).status).toBe(401)
+
+    const otherSecret = await new JoseEntryPassSigner(env.JWT_SECRET).sign({
+      userId: shopperId,
+      jti: crypto.randomUUID(),
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    const expired = await signer.sign({ userId: shopperId, jti: crypto.randomUUID(), expiresAt: new Date(Date.now() - 1000) })
+    for (const token of [otherSecret, expired, 'basura']) {
+      const res = await enter(token)
+      expect([res.status, res.body.error.code]).toEqual([401, 'INVALID_ENTRY_TOKEN'])
+    }
+
+    await AppDataSource.query(`UPDATE users SET is_active = false WHERE id = $1`, [shopperId])
+    const disabled = await enter(await signer.sign({ userId: shopperId, jti: crypto.randomUUID(), expiresAt: new Date(Date.now() + 60_000) }))
+    await AppDataSource.query(`UPDATE users SET is_active = true WHERE id = $1`, [shopperId])
+    expect([disabled.status, disabled.body.error.code]).toEqual([403, 'ACCOUNT_DISABLED'])
+  })
+
+  test('volver a entrar marca ABANDONED la visita activa anterior', async () => {
+    const first = await openVisit()
+    const second = await openVisit()
+    expect(await visitStatus(first)).toBe('ABANDONED')
+    expect(await visitStatus(second)).toBe('ACTIVE')
+
+    const res = await checkout(first, [{ productId: 'AUT-B', quantity: 1 }])
+    expect([res.status, res.body.error.code]).toEqual([409, 'VISIT_CLOSED'])
+  })
+
+  test('webhook: firma, JSON y esquema inválidos', async () => {
+    const visitId = await openVisit()
+    const payload = { eventId: crypto.randomUUID(), visitId, exitedAt: new Date().toISOString(), items: [] }
+
+    const wrong = await webhook(payload, 'sha256=' + '0'.repeat(64))
+    expect([wrong.status, wrong.body.error.code]).toEqual([401, 'INVALID_SIGNATURE'])
+    expect((await webhook(payload, null)).status).toBe(401)
+    // Firma de otro cuerpo: alterar un byte la invalida
+    expect((await webhook(JSON.stringify(payload) + ' ', webhookSigner.sign(JSON.stringify(payload)))).status).toBe(401)
+
+    expect((await webhook('{malformado')).body.error.code).toBe('INVALID_BODY')
+    const invalid = await webhook({ ...payload, visitId: 'no-es-uuid', items: [{ productId: 'AUT-B', quantity: 0 }] })
+    expect([invalid.status, invalid.body.error.code]).toEqual([400, 'VALIDATION_ERROR'])
+    expect(invalid.body.error.details.length).toBeGreaterThan(0)
+    expect(await visitStatus(visitId)).toBe('ACTIVE')
+  })
+
+  test('venta AUTOMATED: cobra, descuenta stock aunque quede negativo y cierra la visita', async () => {
+    const visitId = await openVisit()
+    const exitedAt = new Date().toISOString()
+    const res = await webhook({
+      eventId: 'evt-venta-1',
+      visitId,
+      exitedAt,
+      items: [
+        { productId: 'AUT-A', quantity: 3 }, // solo hay 2: queda en −1
+        { barcode: '2009999000011', quantity: 1 },
+        { productId: 'AUT-B', quantity: 1 },
+        { productId: 'AUT-INACTIVO', quantity: 1 }, // inactivo, pero ya salió de la tienda
+      ],
+    })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ visitId, totalAmount: 418, paymentStatus: 'PAID' })
+    expect(res.body.folio).toBeGreaterThan(0)
+
+    const sale = (await call('GET', `/api/v1/sales/${res.body.saleId}`, { token: ownerToken })).body
+    expect(sale).toMatchObject({
+      saleType: 'AUTOMATED',
+      paymentMethod: 'CARD_ON_FILE',
+      paymentStatus: 'PAID',
+      cashier: null,
+      customer: { id: shopperId, name: 'Beto Smart' },
+      itemCount: 6,
+    })
+    expect(new Date(sale.dateTime).toISOString()).toBe(exitedAt)
+    expect(sale.paymentReference).toStartWith('mock_ch_')
+    expect(sale.items.find((item: Json) => item.productId === 'AUT-B').quantity).toBe(2)
+
+    expect(await stockOf('AUT-A')).toBe(-1)
+    expect(await visitStatus(visitId)).toBe('COMPLETED')
+    const kardex = await call('GET', '/api/v1/inventory/movements?productId=AUT-A&type=SALE', { token: ownerToken })
+    expect(kardex.body.data[0]).toMatchObject({ quantityDelta: -3, stockAfter: -1, saleId: sale.id })
+
+    const purchases = await call('GET', '/api/v1/me/purchases', { token: shopperToken })
+    expect(purchases.body.groups.flatMap((g: Json) => g.sales).some((s: Json) => s.id === sale.id)).toBe(true)
+  })
+
+  test('idempotencia: el mismo eventId devuelve la misma venta; otro evento sobre la visita cerrada → 409', async () => {
+    const visitId = await openVisit()
+    const before = await stockOf('AUT-B')
+    const payload = { eventId: 'evt-idem-1', visitId, exitedAt: new Date().toISOString(), items: [{ productId: 'AUT-B', quantity: 2 }] }
+    const first = await webhook(payload)
+    const retry = await webhook(payload)
+    expect(first.status).toBe(200)
+    expect(retry).toEqual(first)
+    expect(await stockOf('AUT-B')).toBe(before - 2)
+
+    const other = await checkout(visitId, [{ productId: 'AUT-B', quantity: 1 }])
+    expect([other.status, other.body.error.code]).toEqual([409, 'VISIT_CLOSED'])
+
+    // El mismo eventId no puede cerrar otra visita
+    const reused = await checkout(await openVisit(), [{ productId: 'AUT-B', quantity: 1 }], 'evt-idem-1')
+    expect([reused.status, reused.body.error.code]).toEqual([409, 'EVENT_ID_CONFLICT'])
+  })
+
+  test('dos entregas simultáneas del mismo evento: una sola venta y un solo descuento', async () => {
+    const visitId = await openVisit()
+    const before = await stockOf('AUT-B')
+    const payload = { eventId: 'evt-doble', visitId, exitedAt: new Date().toISOString(), items: [{ productId: 'AUT-B', quantity: 1 }] }
+    const results = await Promise.all([webhook(payload), webhook(payload)])
+    expect(results.map((r) => r.status)).toEqual([200, 200])
+    expect(results[0]!.body.saleId).toBe(results[1]!.body.saleId)
+    expect(await stockOf('AUT-B')).toBe(before - 1)
+  })
+
+  test('items vacío: cierra la visita sin venta (también idempotente)', async () => {
+    const visitId = await openVisit()
+    const payload = { eventId: 'evt-vacio', visitId, exitedAt: new Date().toISOString(), items: [] }
+    const res = await webhook(payload)
+    expect(res).toEqual({ status: 200, body: { visitId, saleId: null, folio: null, totalAmount: 0, paymentStatus: null } })
+    expect(await visitStatus(visitId)).toBe('COMPLETED')
+    expect(await webhook(payload)).toEqual(res)
+  })
+
+  test('visita o producto desconocidos → 404; partida sin código o salida fuera de rango → 400', async () => {
+    const unknownVisit = await checkout(crypto.randomUUID(), [])
+    expect([unknownVisit.status, unknownVisit.body.error.code]).toEqual([404, 'VISIT_NOT_FOUND'])
+
+    const visitId = await openVisit()
+    const before = await stockOf('AUT-B')
+    const unknownProduct = await checkout(visitId, [
+      { productId: 'AUT-B', quantity: 1 },
+      { productId: 'NO-EXISTE', quantity: 1 },
+    ])
+    expect([unknownProduct.status, unknownProduct.body.error.code]).toEqual([404, 'PRODUCT_NOT_FOUND'])
+    expect((await checkout(visitId, [{ barcode: '0000000000000', quantity: 1 }])).body.error.code).toBe('PRODUCT_NOT_FOUND')
+    expect((await checkout(visitId, [{ quantity: 1 }])).body.error.code).toBe('ITEM_CODE_REQUIRED')
+    const early = await webhook({ eventId: crypto.randomUUID(), visitId, exitedAt: '2020-01-01T00:00:00Z', items: [] })
+    expect([early.status, early.body.error.code]).toEqual([400, 'INVALID_EXITED_AT'])
+
+    // Nada quedó a medias: la visita sigue abierta y el stock intacto
+    expect(await visitStatus(visitId)).toBe('ACTIVE')
+    expect(await stockOf('AUT-B')).toBe(before)
+    expect((await checkout(visitId, [{ productId: 'AUT-B', quantity: 1 }])).status).toBe(200)
+  })
+
+  test('cobro fallido: la venta queda FAILED y aparece como adeudo en el resumen', async () => {
+    await AppDataSource.query(`UPDATE users SET payment_customer_ref = NULL WHERE id = $1`, [shopperId])
+    const res = await checkout(await openVisit(), [{ productId: 'AUT-B', quantity: 2 }])
+    await AppDataSource.query(`UPDATE users SET payment_customer_ref = 'mock_cus_restaurado' WHERE id = $1`, [shopperId])
+
+    expect(res.body).toMatchObject({ totalAmount: 60, paymentStatus: 'FAILED' })
+    const sale = (await call('GET', `/api/v1/sales/${res.body.saleId}`, { token: ownerToken })).body
+    expect(sale.paymentReference).toBeNull()
+
+    const from = new Date(Date.now() - 3_600_000).toISOString()
+    const to = new Date(Date.now() + 3_600_000).toISOString()
+    const summary = await call('GET', `/api/v1/reports/summary?from=${from}&to=${to}`, { token: ownerToken })
+    expect(summary.body.pendingPayments).toBeCloseTo(60, 2)
+  })
+
+  test('cancelar una venta automática reembolsa en la pasarela; si la pasarela falla, no se cancela', async () => {
+    const paid = (await checkout(await openVisit(), [{ productId: 'AUT-B', quantity: 3 }])).body
+    const sale = (await call('GET', `/api/v1/sales/${paid.saleId}`, { token: ownerToken })).body
+    const stockBefore = await stockOf('AUT-B')
+
+    gateway.rejectRefunds = true
+    const rejected = await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: 'Devolución' } })
+    gateway.rejectRefunds = false
+    expect([rejected.status, rejected.body.error.code]).toEqual([422, 'REFUND_FAILED'])
+    expect((await call('GET', `/api/v1/sales/${sale.id}`, { token: ownerToken })).body).toMatchObject({
+      status: 'COMPLETED',
+      paymentStatus: 'PAID',
+    })
+    expect(await stockOf('AUT-B')).toBe(stockBefore)
+
+    const refundsBefore = gateway.refunds.length
+    const cancelled = await call('POST', `/api/v1/sales/${sale.id}/cancel`, { token: ownerToken, body: { reason: 'Devolución' } })
+    expect(cancelled.body).toMatchObject({ status: 'CANCELLED', paymentStatus: 'REFUNDED' })
+    expect(gateway.refunds.slice(refundsBefore)).toEqual([
+      { transactionId: sale.paymentReference, amount: 90, reference: sale.id },
+    ])
+    expect(await stockOf('AUT-B')).toBe(stockBefore + 3)
+  })
+
+  test('cancelar una venta con cobro fallido no llama a la pasarela', async () => {
+    await AppDataSource.query(`UPDATE users SET payment_customer_ref = NULL WHERE id = $1`, [shopperId])
+    const failed = (await checkout(await openVisit(), [{ productId: 'AUT-B', quantity: 1 }])).body
+    await AppDataSource.query(`UPDATE users SET payment_customer_ref = 'mock_cus_restaurado' WHERE id = $1`, [shopperId])
+
+    const refundsBefore = gateway.refunds.length
+    const res = await call('POST', `/api/v1/sales/${failed.saleId}/cancel`, { token: ownerToken, body: { reason: 'Sin cobro' } })
+    expect(res.body).toMatchObject({ status: 'CANCELLED', paymentStatus: 'FAILED' })
+    expect(gateway.refunds.length).toBe(refundsBefore)
+  })
+
+  test('pasarela simulada: rechaza sin método de pago y según la tasa de fallos', async () => {
+    const sometimes = new MockPaymentGateway({ failureRate: 0.5, random: () => 0.4 })
+    const ref = await sometimes.registerCustomer({ id: shopperId, name: 'x', email: 'x@x.mx' })
+    expect(await sometimes.charge({ customerRef: ref, amount: 10, reference: 'r' })).toEqual({ approved: false, reason: 'CARD_DECLINED' })
+    expect(await sometimes.charge({ customerRef: null, amount: 10, reference: 'r' })).toEqual({ approved: false, reason: 'NO_PAYMENT_METHOD' })
+    const never = new MockPaymentGateway({ failureRate: 0.5, random: () => 0.6 })
+    expect((await never.charge({ customerRef: ref, amount: 10, reference: 'r' })).approved).toBe(true)
+  })
+
+  test('simulador de demo (POST /dev/simulate-visit)', async () => {
+    const missing = await call('POST', '/api/v1/dev/simulate-visit', { token: ownerToken })
+    expect([missing.status, missing.body.error.code]).toEqual([404, 'SIMULATION_CUSTOMER_NOT_FOUND'])
+
+    await call('POST', '/api/v1/auth/register', {
+      body: { name: 'Cliente Simulado', email: env.SEED_CUSTOMER_EMAIL, password: 'secreta-123' },
+    })
+    const res = await call('POST', '/api/v1/dev/simulate-visit', { token: ownerToken })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ customer: { name: 'Cliente Simulado' }, paymentStatus: 'PAID' })
+    expect(res.body.itemCount).toBeGreaterThan(0)
+    expect(res.body.totalAmount).toBeGreaterThan(0)
+    expect(await visitStatus(res.body.visitId)).toBe('COMPLETED')
+
+    expect((await call('POST', '/api/v1/dev/simulate-visit', { token: shopperToken })).status).toBe(403)
+  })
+})
+
+describe('configuración (/settings)', () => {
+  const printer = { connection: 'USB', address: '0416:5011', paperWidthMm: 58 }
+
+  test('GET devuelve la configuración que creó el seed; solo OWNER', async () => {
+    const res = await call('GET', '/api/v1/settings', { token: ownerToken })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      businessName: 'Smart Abarrotes',
+      legalName: null,
+      rfc: null,
+      currency: 'MXN',
+      defaultTaxRate: 0.16,
+      pricesIncludeTax: true,
+      ticketFooter: null,
+      peripherals: {},
+    })
+    expect(Date.parse(res.body.updatedAt)).not.toBeNaN()
+
+    expect((await call('GET', '/api/v1/settings')).status).toBe(401)
+    expect((await call('GET', '/api/v1/settings', { token: customerToken })).status).toBe(403)
+    expect((await call('PATCH', '/api/v1/settings', { token: customerToken, body: { phone: '5555555555' } })).status).toBe(403)
+  })
+
+  test('PATCH parcial: normaliza textos y conserva lo omitido', async () => {
+    const res = await call('PATCH', '/api/v1/settings', {
+      token: ownerToken,
+      body: {
+        businessName: '  Abarrotes Doña Mary ',
+        rfc: 'mary800101ab1',
+        legalName: '   ',
+        ticketFooter: '¡Gracias por su compra!',
+        defaultTaxRate: 0.08,
+        peripherals: { printer, barcodeScanner: { mode: 'KEYBOARD_WEDGE' } },
+      },
+    })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      businessName: 'Abarrotes Doña Mary',
+      rfc: 'MARY800101AB1',
+      legalName: null,
+      address: 'Dirección por configurar',
+      ticketFooter: '¡Gracias por su compra!',
+      defaultTaxRate: 0.08,
+      peripherals: { printer, barcodeScanner: { mode: 'KEYBOARD_WEDGE' } },
+    })
+
+    const again = await call('GET', '/api/v1/settings', { token: ownerToken })
+    expect(again.body).toEqual(res.body)
+  })
+
+  test('peripherals: reemplaza solo los dispositivos enviados', async () => {
+    const res = await call('PATCH', '/api/v1/settings', {
+      token: ownerToken,
+      body: { peripherals: { cardTerminal: { provider: ' Clip ', terminalId: '' } } },
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.peripherals).toEqual({
+      printer,
+      barcodeScanner: { mode: 'KEYBOARD_WEDGE' },
+      cardTerminal: { provider: 'Clip', terminalId: null },
+    })
+  })
+
+  test('validación: RFC inválido, textos vacíos, dispositivo incompleto y body vacío → 400', async () => {
+    const invalid = [
+      { rfc: 'ABC123' },
+      { businessName: '' },
+      { address: '' },
+      { defaultTaxRate: 1.5 },
+      { logoUrl: 'no-es-url' },
+      { peripherals: { printer: { connection: 'USB' } } },
+      { peripherals: { printer: { ...printer, paperWidthMm: 70 } } },
+      {},
+    ]
+    for (const body of invalid) {
+      const res = await call('PATCH', '/api/v1/settings', { token: ownerToken, body })
+      expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 400])
+    }
+    // Nada de lo anterior se guardó
+    const current = await call('GET', '/api/v1/settings', { token: ownerToken })
+    expect(current.body).toMatchObject({ businessName: 'Abarrotes Doña Mary', defaultTaxRate: 0.08 })
+  })
+
+  test('el ticket usa el perfil y las altas sin taxRate usan defaultTaxRate', async () => {
+    const created = await call('POST', '/api/v1/products', {
+      token: ownerToken,
+      body: { id: 'CFG-IVA', name: 'Producto zona fronteriza', categoryId, price: 10.8, purchaseCost: 5, initialStock: 2 },
+    })
+    expect([created.status, created.body.taxRate]).toEqual([201, 0.08])
+
+    const sale = await call('POST', '/api/v1/sales', {
+      token: ownerToken,
+      body: { items: [{ productId: 'CFG-IVA', quantity: 1 }], paymentMethod: 'CARD' },
+    })
+    expect(sale.status).toBe(201)
+    const receipt = await call('GET', `/api/v1/sales/${sale.body.id}/receipt`, { token: ownerToken })
+    expect(receipt.body.business).toMatchObject({
+      name: 'Abarrotes Doña Mary',
+      rfc: 'MARY800101AB1',
+      footer: '¡Gracias por su compra!',
+    })
+    expect(receipt.body.taxBreakdown).toEqual([expect.objectContaining({ rate: 0.08 })])
   })
 })
 

@@ -11,6 +11,8 @@ export interface NewUser {
 export interface UserRepository {
   findById(id: string): Promise<User | null>
   findByEmailWithPassword(email: string): Promise<(User & { passwordHash: string }) | null>
+  findByEmail(email: string): Promise<User | null>
   /** @throws ConflictError `EMAIL_ALREADY_REGISTERED` */
   create(data: NewUser): Promise<User>
+  setPaymentCustomerRef(id: string, ref: string): Promise<void>
 }

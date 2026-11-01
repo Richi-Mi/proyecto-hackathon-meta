@@ -21,6 +21,19 @@ export function priceLine({ quantity, unitPrice, taxRate }: PriceableLine) {
   return { total, base, tax: roundMoney(total - base) }
 }
 
+/** Desglose de IVA por tasa a partir de las partidas del ticket (igual que GET /sales/{id}/receipt). */
+export function taxBreakdown(items: { subtotal: number; taxRate: number }[]) {
+  const byRate = new Map<number, { rate: number; base: number; tax: number }>()
+  for (const { subtotal, taxRate } of items) {
+    const base = roundMoney(subtotal / (1 + taxRate))
+    const line = byRate.get(taxRate) ?? { rate: taxRate, base: 0, tax: 0 }
+    line.base = roundMoney(line.base + base)
+    line.tax = roundMoney(line.tax + subtotal - base)
+    byRate.set(taxRate, line)
+  }
+  return [...byRate.values()].sort((a, b) => a.rate - b.rate)
+}
+
 export function priceSale(lines: PriceableLine[]) {
   const sums = lines.map(priceLine).reduce(
     (acc, line) => ({ subtotal: acc.subtotal + line.base, taxAmount: acc.taxAmount + line.tax, totalAmount: acc.totalAmount + line.total }),

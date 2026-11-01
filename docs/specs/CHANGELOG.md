@@ -1,5 +1,43 @@
 # Changelog del contrato (`openapi.yaml`)
 
+## 1.0.6 — 2026-11-01
+
+Implementación de `GET /settings` y `PATCH /settings`. Con esto el contrato queda implementado completo. Sin cambios incompatibles para el frontend.
+
+- **`PATCH /settings`** es parcial (sin defaults). En `peripherals` se reemplaza cada dispositivo enviado y los omitidos se conservan. Los textos se recortan, los vacíos de `legalName`, `phone` y `ticketFooter` se guardan como `null` y el RFC en mayúsculas.
+- **`StoreSettingsUpdate`** fija límites alineados con el ERD: `businessName` 1–150, `legalName` ≤ 200, `address` 1–500, `phone` ≤ 20, `logoUrl` ≤ 500, `ticketFooter` ≤ 500 y el formato del RFC (12 o 13 caracteres). El 400 documenta `VALIDATION_ERROR`.
+- **`Peripherals`**: cada dispositivo enviado debe venir completo (`printer`: `connection`, `address`, `paperWidthMm`; `barcodeScanner`: `mode`; `cardTerminal`: `provider`, `terminalId`). Límites: `address` ≤ 100, `provider` y `terminalId` ≤ 50.
+- **`StoreSettings`** marca como requeridos los campos nullable (el servidor los envía con `null`). `updatedAt` se omite si la tienda aún no se configuró.
+- **`ProductCreate.taxRate`** ya no tiene `default: 0.16`: si se omite, se usa `defaultTaxRate` de `/settings`.
+
+## 1.0.5 — 2026-11-01
+
+Implementación del flujo automático (Smart Store): `POST /store/entry` y `POST /webhooks/checkout`, más el reembolso por pasarela al cancelar. Sin cambios incompatibles para el frontend.
+
+- **`/store/entry`**: si el cliente ya tenía una visita ACTIVE, se marca ABANDONED y se abre una nueva. Códigos `INVALID_DEVICE_KEY`, `INVALID_ENTRY_TOKEN` (401), `ACCOUNT_DISABLED` (nuevo 403) y `ENTRY_TOKEN_REUSED` (409). `StoreEntryRequest` y `StoreEntryResponse.user` fijan longitudes y campos requeridos.
+- **`/webhooks/checkout`**: se documentan la firma sobre el cuerpo crudo, la idempotencia por `eventId` (también cuando `items` está vacío), que la venta no se rechaza por stock ni por producto INACTIVE, y los códigos `ITEM_CODE_REQUIRED`, `INVALID_EXITED_AT`, `INVALID_SIGNATURE`, `VISIT_NOT_FOUND`, `PRODUCT_NOT_FOUND`, `VISIT_CLOSED` y `EVENT_ID_CONFLICT`. Límites: `eventId` ≤ 100, ≤ 100 partidas, cantidad ≤ 999.
+- **`CheckoutWebhookResponse`**: todos los campos son requeridos; sin venta, `folio` y `paymentStatus` son `null` y `totalAmount` es 0.
+- **`POST /sales/{id}/cancel`**: un pago `CARD_ON_FILE` PAID se reembolsa en la pasarela dentro de la transacción; nuevo 422 `REFUND_FAILED`.
+- **Nuevo `POST /dev/simulate-visit`** (tag Dev, solo si `NODE_ENV ≠ production`): visita completa del cliente demo para la demostración. Esquema `SimulatedVisit`.
+- ERD: `store_visits.exit_event_id` (único) para la idempotencia de las salidas sin venta, y como máximo una visita ACTIVE por cliente.
+
+## 1.0.4 — 2026-11-01
+
+Implementación de `GET /me/purchases`, `GET /me/purchases/{saleId}`, `GET /sales`, `GET /sales/{id}/receipt` y `POST /sales/{id}/cancel`. Sin cambios incompatibles.
+
+- Historial del cliente: paginación por compra, agrupación por día en la zona horaria de la tienda; el total del día excluye canceladas.
+- `GET /me/purchases/{saleId}` responde 404 `PURCHASE_NOT_FOUND` también para compras ajenas.
+- Cancelación: repone stock con movimientos `CANCELLATION`, `PAID → REFUNDED`; códigos `SALE_ALREADY_CANCELLED` (409) e `INVALID_REASON` (400).
+- `Receipt` marca como requeridos `taxBreakdown` y todos los campos de `business` (el servidor siempre los envía, con `null` cuando no aplica).
+
+## 1.0.3 — 2026-11-01
+
+Implementación de `/reports/summary`, `/reports/sales-trend` y `/reports/top-products`. Sin cambios incompatibles.
+
+- Se documenta la semántica: rango semiabierto `[from, to)`, solo ventas COMPLETED, periodos en la zona horaria de la tienda (`STORE_TIMEZONE`) y periodos vacíos en cero.
+- Nuevos códigos 400: `INVALID_RANGE` y `RANGE_TOO_LARGE` (más de 400 días o más de 1000 puntos en la serie).
+- `ReportSummary` marca como requeridos `taxCollected`, `byType` (con `AUTOMATED`/`MANUAL` y sus campos) y `pendingPayments`; el servidor siempre los envía.
+
 ## 1.0.2 — 2026-10-31
 
 Ajustes al implementar `GET /me/entry-pass`, `POST /sales` y `GET /sales/{id}` (Bloque 4). Sin cambios incompatibles.

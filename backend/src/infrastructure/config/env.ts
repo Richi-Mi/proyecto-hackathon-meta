@@ -16,6 +16,18 @@ const EnvSchema = Type.Object({
   ENTRY_PASS_SECRET: Type.String({ minLength: 32 }),
   ENTRY_PASS_TTL_SECONDS: Type.Integer({ minimum: 15, maximum: 600, default: 60 }),
 
+  /** Llaves de los dispositivos de la tienda (escáner de entrada), separadas por coma, para `X-Device-Key` */
+  STORE_DEVICE_KEYS: Type.String({ minLength: 16 }),
+  /** Secreto HMAC-SHA256 con el que el sistema de cámaras firma el webhook de salida */
+  WEBHOOK_SECRET: Type.String({ minLength: 32 }),
+  /** Pasarela simulada: probabilidad (0–1) de rechazar un cobro, para probar adeudos */
+  MOCK_PAYMENT_FAILURE_RATE: Type.Number({ minimum: 0, maximum: 1, default: 0 }),
+  /** Cliente que usa el simulador de visitas (el mismo que crea el seed) */
+  SEED_CUSTOMER_EMAIL: Type.String({ default: 'cliente@smart-abarrotes.mx' }),
+
+  /** Zona IANA de la tienda: los reportes agrupan por día/semana/mes en hora local */
+  STORE_TIMEZONE: Type.String({ default: 'America/Mexico_City' }),
+
   /** Orígenes permitidos separados por coma */
   CORS_ORIGINS: Type.String({ default: 'http://localhost:5173' }),
 
@@ -34,7 +46,23 @@ function loadEnv(): Env {
     const problems = [...Value.Errors(EnvSchema, value)].map((e) => `  ${e.path}: ${e.message}`)
     throw new Error(`Variables de entorno inválidas:\n${problems.join('\n')}`)
   }
+  try {
+    new Intl.DateTimeFormat('es-MX', { timeZone: value.STORE_TIMEZONE })
+  } catch {
+    throw new Error(`STORE_TIMEZONE inválida: "${value.STORE_TIMEZONE}" (usa una zona IANA, p. ej. America/Mexico_City)`)
+  }
+  const deviceKeys = parseList(value.STORE_DEVICE_KEYS)
+  if (deviceKeys.length === 0 || deviceKeys.some((key) => key.length < 16)) {
+    throw new Error('STORE_DEVICE_KEYS: cada llave debe tener al menos 16 caracteres')
+  }
   return value
 }
+
+/** Lista separada por comas, sin espacios ni elementos vacíos */
+export const parseList = (value: string) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
 
 export const env = loadEnv()

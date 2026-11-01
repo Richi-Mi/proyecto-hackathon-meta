@@ -21,6 +21,25 @@ export function priceLine({ quantity, unitPrice, taxRate }: PriceableLine): Line
   return { total, base, tax: roundMoney(total - base) }
 }
 
+export interface TaxBreakdownLine {
+  rate: number
+  base: number
+  tax: number
+}
+
+/** Desglose de IVA por tasa para el ticket (misma base redondeada por partida que al vender). */
+export function taxBreakdown(items: { subtotal: number; taxRate: number }[]): TaxBreakdownLine[] {
+  const byRate = new Map<number, TaxBreakdownLine>()
+  for (const { subtotal, taxRate } of items) {
+    const base = roundMoney(subtotal / (1 + taxRate))
+    const line = byRate.get(taxRate) ?? { rate: taxRate, base: 0, tax: 0 }
+    line.base = roundMoney(line.base + base)
+    line.tax = roundMoney(line.tax + subtotal - base)
+    byRate.set(taxRate, line)
+  }
+  return [...byRate.values()].sort((a, b) => a.rate - b.rate)
+}
+
 export interface SaleTotals {
   /** Σ base sin IVA */
   subtotal: number

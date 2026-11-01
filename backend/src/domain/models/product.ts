@@ -23,7 +23,6 @@ export interface Product {
   updatedAt: Date
 }
 
-export const DEFAULT_TAX_RATE = 0.16
 export const DEFAULT_MIN_STOCK_ALERT = 5
 
 export const isLowStock = (product: Pick<Product, 'stock' | 'minStockAlert'>) => product.stock <= product.minStockAlert

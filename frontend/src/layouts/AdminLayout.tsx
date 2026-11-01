@@ -29,6 +29,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from '@/components/ui/sidebar'
+import { useSettingsStore } from '@/features/admin/settings/settings-store'
 import { useSession, useSessionStore } from '@/features/auth/session-store'
 import { getInitials } from '@/lib/format'
 import { ADMIN_NAVIGATION, findActiveNavItem, isNavItemActive } from './admin-navigation'
@@ -37,6 +38,12 @@ import { ADMIN_NAVIGATION, findActiveNavItem, isNavItemActive } from './admin-na
 export function AdminLayout() {
   const { pathname } = useLocation()
   const title = findActiveNavItem(pathname)?.label ?? 'Panel'
+  const loadSettings = useSettingsStore((state) => state.load)
+
+  // IVA por defecto (alta de productos) y ancho del ticket impreso
+  useEffect(() => {
+    void loadSettings()
+  }, [loadSettings])
 
   useEffect(() => {
     document.title = `${title} · Smart Abarrotes`

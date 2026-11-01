@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Smart Abarrotes API
-  version: 1.0.2
+  version: 1.0.6
   description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
 servers:
   - url: http://localhost:3000/api/v1
@@ -16,6 +16,7 @@ tags:
   - { name: Sales }
   - { name: Reports }
   - { name: Settings }
+  - { name: Dev, description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production' }
 
 paths:
   /health:
@@ -128,6 +129,10 @@ paths:
       operationId: listMyPurchases
       tags: [Customer]
       summary: Historial de compras agrupado por fecha
+      description: |
+        Compras del cliente (automáticas y de mostrador donde se le identificó), más recientes primero.
+        La paginación es por compra; luego se agrupan por día en la zona horaria de la tienda. `totalAmount` del grupo excluye las canceladas.
+        Rango opcional [from, to); 400 `INVALID_RANGE` si from ≥ to.
       security: [{ bearerAuth: [CUSTOMER] }]
       parameters:
         - { $ref: '#/components/parameters/From' }
@@ -148,6 +153,7 @@ paths:
       operationId: getMyPurchase
       tags: [Customer]
       summary: Detalle de una compra propia
+      description: 404 `PURCHASE_NOT_FOUND` también si la venta existe pero es de otra persona (no se revela su existencia).
       security: [{ bearerAuth: [CUSTOMER] }]
       parameters:
         - { name: saleId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -167,6 +173,10 @@ paths:
       operationId: registerStoreEntry
       tags: [Store Devices]
       summary: El escáner valida el QR y abre una visita
+      description: |
+        El escáner se autentica con `X-Device-Key` (una de las llaves de `STORE_DEVICE_KEYS`) y envía el JWT del QR.
+        Si el cliente ya tenía una visita ACTIVE (p. ej. salió sin que llegara el webhook), esa visita se marca ABANDONED y se abre una nueva.
+        Errores: 401 `INVALID_DEVICE_KEY`, `INVALID_ENTRY_TOKEN` (firma, tipo o expiración) · 403 `ACCOUNT_DISABLED` · 409 `ENTRY_TOKEN_REUSED`.
       security: [{ deviceKey: [] }]
       requestBody:
         required: true
@@ -180,6 +190,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/StoreEntryResponse' }
         '401': { description: Token inválido/expirado o device key inválida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Cuenta desactivada (ACCOUNT_DISABLED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: Token ya utilizado (ENTRY_TOKEN_REUSED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
   /webhooks/checkout:
@@ -188,9 +199,13 @@ paths:
       tags: [Store Devices]
       summary: Webhook de salida del sistema de cámaras → venta AUTOMATED + cobro + descuento de stock
       description: |
-        Firma: `X-Signature: sha256=<hex(HMAC_SHA256(WEBHOOK_SECRET, rawBody))>`.
-        Idempotente por `eventId`: un reintento devuelve la misma venta con 200.
-        Si `items` está vacío se cierra la visita sin venta (`saleId: null`).
+        Firma: `X-Signature: sha256=<hex(HMAC_SHA256(WEBHOOK_SECRET, rawBody))>` sobre el cuerpo crudo; se valida antes de leer el JSON.
+        Idempotente por `eventId`: un reintento devuelve la misma respuesta con 200.
+        Si `items` está vacío se cierra la visita sin venta (`saleId: null`, `folio: null`, `totalAmount: 0`, `paymentStatus: null`).
+        La venta es AUTOMATED con `CARD_ON_FILE`, fecha = `exitedAt` y los precios vigentes del producto. **No se rechaza por stock** (puede quedar negativo) ni por producto INACTIVE: la mercancía ya salió.
+        Cada partida identifica el producto por `productId` (SKU) o `barcode`; las repetidas se suman.
+        El cobro se intenta después de registrar la venta: `PAID` o `FAILED` (adeudo visible en `pendingPayments` de `/reports/summary`).
+        Errores: 400 `VALIDATION_ERROR`, `INVALID_BODY`, `ITEM_CODE_REQUIRED`, `INVALID_EXITED_AT` (antes de la entrada o en el futuro) · 401 `INVALID_SIGNATURE` · 404 `VISIT_NOT_FOUND`, `PRODUCT_NOT_FOUND` · 409 `VISIT_CLOSED` (visita cerrada o abandonada), `EVENT_ID_CONFLICT` (el `eventId` ya cerró otra visita).
       security: [{ webhookSignature: [] }]
       requestBody:
         required: true
@@ -206,7 +221,29 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { description: Firma inválida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Visita o producto desconocido, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '409': { description: Visita ya cerrada con otro eventId, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Visita ya cerrada con otro eventId (VISIT_CLOSED) o eventId de otra visita (EVENT_ID_CONFLICT), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ---------------- DEV ----------------
+  /dev/simulate-visit:
+    post:
+      operationId: simulateStoreVisit
+      tags: [Dev]
+      summary: Simula una visita completa del cliente demo (entrada con QR + salida con productos al azar)
+      description: |
+        Solo existe si `NODE_ENV ≠ production`. Usa al cliente `SEED_CUSTOMER_EMAIL`, elige de 1 a 4 productos activos (con stock si los hay)
+        y ejecuta los mismos casos de uso que `/store/entry` y `/webhooks/checkout`, incluido el cobro simulado.
+        Errores: 404 `SIMULATION_CUSTOMER_NOT_FOUND` · 422 `NO_PRODUCTS_AVAILABLE`.
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: Visita simulada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulatedVisit' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: NO_PRODUCTS_AVAILABLE, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ---------------- CATEGORIES ----------------
   /categories:
@@ -470,6 +507,7 @@ paths:
       operationId: listSales
       tags: [Sales]
       summary: Historial cronológico de tickets
+      description: Rango opcional [from, to); 400 `INVALID_RANGE` si from ≥ to. Incluye ventas canceladas salvo que se filtre por `status`.
       security: [{ bearerAuth: [OWNER] }]
       parameters:
         - { $ref: '#/components/parameters/From' }
@@ -561,6 +599,10 @@ paths:
       operationId: cancelSale
       tags: [Sales]
       summary: Cancela la venta completa, repone stock y reembolsa (CARD_ON_FILE vía gateway)
+      description: |
+        En una transacción: repone el stock de cada partida con un movimiento `CANCELLATION` en el kardex y marca la venta como CANCELLED (fecha, usuario y motivo).
+        `paymentStatus` pasa de PAID a REFUNDED; los cobros PENDING o FAILED conservan su estado. 400 `INVALID_REASON` si el motivo tiene menos de 3 caracteres.
+        Si el pago fue `CARD_ON_FILE` y estaba PAID, el reembolso se pide a la pasarela dentro de la misma transacción: si la pasarela lo rechaza, responde 422 `REFUND_FAILED` y la venta queda sin cancelar.
       security: [{ bearerAuth: [OWNER] }]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -577,6 +619,7 @@ paths:
               schema: { $ref: '#/components/schemas/SaleDetail' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: SALE_ALREADY_CANCELLED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: REFUND_FAILED (la pasarela rechazó el reembolso), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -587,6 +630,9 @@ paths:
       operationId: getReportSummary
       tags: [Reports]
       summary: Métricas clave en un rango (el dashboard pide hoy y semana)
+      description: |
+        Rango semiabierto [from, to) sobre ventas COMPLETED (las canceladas no cuentan). Errores 400: `INVALID_RANGE` (from ≥ to o fecha inválida), `RANGE_TOO_LARGE` (más de 400 días).
+        `revenue` incluye ventas con cobro pendiente o fallido; esas además se suman en `pendingPayments`.
       security: [{ bearerAuth: [OWNER] }]
       parameters:
         - { $ref: '#/components/parameters/FromRequired' }
@@ -604,6 +650,9 @@ paths:
     get:
       operationId: getSalesTrend
       summary: Serie temporal de ventas y ganancia
+      description: |
+        Rango semiabierto [from, to) sobre ventas COMPLETED (las canceladas no cuentan). Errores 400: `INVALID_RANGE` (from ≥ to o fecha inválida), `RANGE_TOO_LARGE` (más de 400 días), o más de 1000 puntos para la granularidad elegida.
+        Los periodos se truncan en la zona horaria de la tienda (`STORE_TIMEZONE`, por defecto America/Mexico_City; semanas desde el lunes) y `bucket` es el instante de inicio del periodo. Los periodos sin ventas se incluyen en cero.
       tags: [Reports]
       security: [{ bearerAuth: [OWNER] }]
       parameters:
@@ -624,6 +673,9 @@ paths:
       operationId: getTopProducts
       tags: [Reports]
       summary: Productos de mayor rotación
+      description: |
+        Rango semiabierto [from, to) sobre ventas COMPLETED (las canceladas no cuentan). Errores 400: `INVALID_RANGE` (from ≥ to o fecha inválida), `RANGE_TOO_LARGE` (más de 400 días).
+        `revenue` es IVA incluido; `netProfit` = Σ base sin IVA − Σ costo (snapshot de cada partida). Empates por nombre.
       security: [{ bearerAuth: [OWNER] }]
       parameters:
         - { $ref: '#/components/parameters/FromRequired' }
@@ -645,6 +697,7 @@ paths:
     get:
       operationId: getSettings
       summary: Configuración general del negocio
+      description: Si la tienda aún no se configuró, devuelve los valores por defecto (sin `updatedAt`).
       tags: [Settings]
       security: [{ bearerAuth: [OWNER] }]
       responses:
@@ -658,6 +711,11 @@ paths:
     patch:
       operationId: updateSettings
       summary: Actualiza configuración general
+      description: |
+        Actualización parcial: los campos omitidos conservan su valor (no se aplican defaults).
+        Los textos se recortan; `legalName`, `phone` o `ticketFooter` vacíos se guardan como `null` y el RFC se guarda en mayúsculas.
+        En `peripherals` se reemplaza cada dispositivo enviado (`printer`, `barcodeScanner`, `cardTerminal`) y los omitidos conservan su configuración.
+        Los cambios de perfil se reflejan en los tickets (`GET /sales/{id}/receipt`) y `defaultTaxRate` en las altas de producto sin `taxRate`.
       tags: [Settings]
       security: [{ bearerAuth: [OWNER] }]
       requestBody:
@@ -671,7 +729,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StoreSettings' }
-        '400': { $ref: '#/components/responses/BadRequest' }
+        '400':
+          description: Validación fallida (`VALIDATION_ERROR`, p. ej. RFC con formato inválido)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -771,8 +831,8 @@ components:
       type: object
       required: [token, gateId]
       properties:
-        token: { type: string }
-        gateId: { type: string }
+        token: { type: string, minLength: 1, maxLength: 2048 }
+        gateId: { type: string, minLength: 1, maxLength: 64 }
     StoreEntryResponse:
       type: object
       required: [visitId, user, enteredAt]
@@ -780,6 +840,7 @@ components:
         visitId: { type: string, format: uuid }
         user:
           type: object
+          required: [id, name]
           properties:
             id: { type: string, format: uuid }
             name: { type: string }
@@ -788,27 +849,52 @@ components:
       type: object
       required: [eventId, visitId, exitedAt, items]
       properties:
-        eventId: { type: string, description: ID único del evento del proveedor de cámaras }
+        eventId: { type: string, minLength: 1, maxLength: 100, description: ID único del evento del proveedor de cámaras }
         visitId: { type: string, format: uuid }
         exitedAt: { type: string, format: date-time }
         items:
           type: array
+          maxItems: 100
           items:
             type: object
             required: [quantity]
+            description: Requiere `productId` o `barcode` (400 `ITEM_CODE_REQUIRED`); si vienen ambos se usa `productId`.
             properties:
-              productId: { type: string, description: SKU (o usar barcode) }
-              barcode: { type: string }
-              quantity: { type: integer, minimum: 1 }
+              productId: { type: string, minLength: 1, maxLength: 64, description: SKU (o usar barcode) }
+              barcode: { type: string, minLength: 1, maxLength: 64 }
+              quantity: { type: integer, minimum: 1, maximum: 999 }
     CheckoutWebhookResponse:
       type: object
-      required: [visitId, saleId]
+      required: [visitId, saleId, folio, totalAmount, paymentStatus]
       properties:
         visitId: { type: string, format: uuid }
         saleId: { type: [string, 'null'], format: uuid }
         folio: { type: [integer, 'null'] }
         totalAmount: { $ref: '#/components/schemas/Money' }
-        paymentStatus: { $ref: '#/components/schemas/PaymentStatus' }
+        paymentStatus:
+          description: null si la visita se cerró sin venta
+          anyOf:
+            - { $ref: '#/components/schemas/PaymentStatus' }
+            - { type: 'null' }
+    SimulatedVisit:
+      type: object
+      required: [customer, visitId, saleId, folio, totalAmount, paymentStatus, itemCount]
+      properties:
+        customer:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        visitId: { type: string, format: uuid }
+        saleId: { type: [string, 'null'], format: uuid }
+        folio: { type: [integer, 'null'] }
+        totalAmount: { $ref: '#/components/schemas/Money' }
+        paymentStatus:
+          anyOf:
+            - { $ref: '#/components/schemas/PaymentStatus' }
+            - { type: 'null' }
+        itemCount: { type: integer, description: Piezas totales que se llevó }
 
     Category:
       type: object
@@ -869,7 +955,9 @@ components:
         categoryId: { type: string, format: uuid }
         price: { $ref: '#/components/schemas/Money' }
         purchaseCost: { $ref: '#/components/schemas/Money' }
-        taxRate: { $ref: '#/components/schemas/TaxRate', default: 0.16 }
+        taxRate:
+          $ref: '#/components/schemas/TaxRate'
+          description: Si se omite, se usa `defaultTaxRate` de `/settings` (0.16 si la tienda no está configurada).
         initialStock: { type: integer, minimum: 0, default: 0, description: Genera movimiento RESTOCK }
         minStockAlert: { type: integer, minimum: 0, default: 5 }
         status: { $ref: '#/components/schemas/ProductStatus', default: ACTIVE }
@@ -1022,10 +1110,11 @@ components:
         meta: { $ref: '#/components/schemas/PaginationMeta' }
     Receipt:
       type: object
-      required: [business, sale, printedAt]
+      required: [business, sale, taxBreakdown, printedAt]
       properties:
         business:
           type: object
+          required: [name, legalName, rfc, address, phone, logoUrl, footer]
           properties:
             name: { type: string }
             legalName: { type: [string, 'null'] }
@@ -1039,6 +1128,7 @@ components:
           type: array
           items:
             type: object
+            required: [rate, base, tax]
             properties:
               rate: { $ref: '#/components/schemas/TaxRate' }
               base: { $ref: '#/components/schemas/Money' }
@@ -1047,7 +1137,7 @@ components:
 
     ReportSummary:
       type: object
-      required: [from, to, revenue, netProfit, transactions, averageTicket]
+      required: [from, to, revenue, taxCollected, netProfit, transactions, averageTicket, byType, pendingPayments]
       properties:
         from: { type: string, format: date-time }
         to: { type: string, format: date-time }
@@ -1058,9 +1148,10 @@ components:
         averageTicket: { $ref: '#/components/schemas/Money' }
         byType:
           type: object
+          required: [AUTOMATED, MANUAL]
           properties:
-            AUTOMATED: { type: object, properties: { revenue: { $ref: '#/components/schemas/Money' }, transactions: { type: integer } } }
-            MANUAL: { type: object, properties: { revenue: { $ref: '#/components/schemas/Money' }, transactions: { type: integer } } }
+            AUTOMATED: { type: object, required: [revenue, transactions], properties: { revenue: { $ref: '#/components/schemas/Money' }, transactions: { type: integer } } }
+            MANUAL: { type: object, required: [revenue, transactions], properties: { revenue: { $ref: '#/components/schemas/Money' }, transactions: { type: integer } } }
         pendingPayments: { $ref: '#/components/schemas/Money', description: 'Σ ventas con paymentStatus FAILED/PENDING' }
     TrendPoint:
       type: object
@@ -1082,25 +1173,30 @@ components:
 
     Peripherals:
       type: object
+      description: Cada dispositivo es opcional (ausente = sin configurar).
       properties:
         printer:
           type: object
+          required: [connection, address, paperWidthMm]
+          description: Impresora térmica ESC/POS. La prueba de impresión la hace el navegador (WebUSB / Web Bluetooth).
           properties:
             connection: { type: string, enum: [BLUETOOTH, NETWORK, USB, NONE] }
-            address: { type: [string, 'null'], description: 'MAC, IP:puerto o vendorId:productId' }
+            address: { type: [string, 'null'], maxLength: 100, description: 'MAC, IP:puerto o vendorId:productId (hex, p. ej. 0416:5011)' }
             paperWidthMm: { type: integer, enum: [58, 80] }
         barcodeScanner:
           type: object
+          required: [mode]
           properties:
             mode: { type: string, enum: [KEYBOARD_WEDGE, BLUETOOTH, CAMERA] }
         cardTerminal:
           type: object
+          required: [provider, terminalId]
           properties:
-            provider: { type: [string, 'null'] }
-            terminalId: { type: [string, 'null'] }
+            provider: { type: [string, 'null'], maxLength: 50 }
+            terminalId: { type: [string, 'null'], maxLength: 50 }
     StoreSettings:
       type: object
-      required: [businessName, address, currency, defaultTaxRate, pricesIncludeTax, peripherals]
+      required: [businessName, legalName, rfc, address, phone, logoUrl, currency, defaultTaxRate, pricesIncludeTax, ticketFooter, peripherals]
       properties:
         businessName: { type: string }
         legalName: { type: [string, 'null'] }
@@ -1113,18 +1209,21 @@ components:
         pricesIncludeTax: { type: boolean, const: true }
         ticketFooter: { type: [string, 'null'] }
         peripherals: { $ref: '#/components/schemas/Peripherals' }
-        updatedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, description: Ausente si la tienda aún no se configuró }
     StoreSettingsUpdate:
       type: object
       minProperties: 1
       description: Cualquier subconjunto de StoreSettings excepto currency, pricesIncludeTax y updatedAt.
       properties:
-        businessName: { type: string }
-        legalName: { type: [string, 'null'] }
-        rfc: { type: [string, 'null'] }
-        address: { type: string }
-        phone: { type: [string, 'null'] }
-        logoUrl: { type: [string, 'null'], format: uri }
+        businessName: { type: string, minLength: 1, maxLength: 150 }
+        legalName: { type: [string, 'null'], maxLength: 200 }
+        rfc:
+          type: [string, 'null']
+          pattern: '^[A-Za-zÑñ&]{3,4}[0-9]{6}[A-Za-z0-9]{3}$'
+          description: 12 caracteres (persona moral) o 13 (persona física); se guarda en mayúsculas
+        address: { type: string, minLength: 1, maxLength: 500 }
+        phone: { type: [string, 'null'], maxLength: 20 }
+        logoUrl: { type: [string, 'null'], format: uri, maxLength: 500 }
         defaultTaxRate: { $ref: '#/components/schemas/TaxRate' }
-        ticketFooter: { type: [string, 'null'] }
+        ticketFooter: { type: [string, 'null'], maxLength: 500 }
         peripherals: { $ref: '#/components/schemas/Peripherals' }

@@ -9,7 +9,6 @@ const lazyPage =
   <M,>(load: () => Promise<M>, pick: (module: M) => ComponentType) =>
   async () => ({ Component: pick(await load()) })
 
-const adminPages = () => import('@/features/admin/pages/placeholders')
 
 export const router = createBrowserRouter([
   {
@@ -99,8 +98,8 @@ export const router = createBrowserRouter([
                     path: 'inventory',
                     lazy: lazyPage(() => import('@/features/admin/pages/InventoryPage'), (m) => m.InventoryPage),
                   },
-                  { path: 'sales', lazy: lazyPage(adminPages, (m) => m.SalesPage) },
-                  { path: 'settings', lazy: lazyPage(adminPages, (m) => m.SettingsPage) },
+                  { path: 'sales', lazy: lazyPage(() => import('@/features/admin/pages/SalesPage'), (m) => m.SalesPage) },
+                  { path: 'settings', lazy: lazyPage(() => import('@/features/admin/pages/SettingsPage'), (m) => m.SettingsPage) },
                 ],
               },
             ],

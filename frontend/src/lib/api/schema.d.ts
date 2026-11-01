@@ -113,7 +113,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Historial de compras agrupado por fecha */
+        /**
+         * Historial de compras agrupado por fecha
+         * @description Compras del cliente (automáticas y de mostrador donde se le identificó), más recientes primero.
+         *     La paginación es por compra; luego se agrupan por día en la zona horaria de la tienda. `totalAmount` del grupo excluye las canceladas.
+         *     Rango opcional [from, to); 400 `INVALID_RANGE` si from ≥ to.
+         */
         get: operations["listMyPurchases"];
         put?: never;
         post?: never;
@@ -130,7 +135,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Detalle de una compra propia */
+        /**
+         * Detalle de una compra propia
+         * @description 404 `PURCHASE_NOT_FOUND` también si la venta existe pero es de otra persona (no se revela su existencia).
+         */
         get: operations["getMyPurchase"];
         put?: never;
         post?: never;
@@ -149,7 +157,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** El escáner valida el QR y abre una visita */
+        /**
+         * El escáner valida el QR y abre una visita
+         * @description El escáner se autentica con `X-Device-Key` (una de las llaves de `STORE_DEVICE_KEYS`) y envía el JWT del QR.
+         *     Si el cliente ya tenía una visita ACTIVE (p. ej. salió sin que llegara el webhook), esa visita se marca ABANDONED y se abre una nueva.
+         *     Errores: 401 `INVALID_DEVICE_KEY`, `INVALID_ENTRY_TOKEN` (firma, tipo o expiración) · 403 `ACCOUNT_DISABLED` · 409 `ENTRY_TOKEN_REUSED`.
+         */
         post: operations["registerStoreEntry"];
         delete?: never;
         options?: never;
@@ -168,11 +181,37 @@ export interface paths {
         put?: never;
         /**
          * Webhook de salida del sistema de cámaras → venta AUTOMATED + cobro + descuento de stock
-         * @description Firma: `X-Signature: sha256=<hex(HMAC_SHA256(WEBHOOK_SECRET, rawBody))>`.
-         *     Idempotente por `eventId`: un reintento devuelve la misma venta con 200.
-         *     Si `items` está vacío se cierra la visita sin venta (`saleId: null`).
+         * @description Firma: `X-Signature: sha256=<hex(HMAC_SHA256(WEBHOOK_SECRET, rawBody))>` sobre el cuerpo crudo; se valida antes de leer el JSON.
+         *     Idempotente por `eventId`: un reintento devuelve la misma respuesta con 200.
+         *     Si `items` está vacío se cierra la visita sin venta (`saleId: null`, `folio: null`, `totalAmount: 0`, `paymentStatus: null`).
+         *     La venta es AUTOMATED con `CARD_ON_FILE`, fecha = `exitedAt` y los precios vigentes del producto. **No se rechaza por stock** (puede quedar negativo) ni por producto INACTIVE: la mercancía ya salió.
+         *     Cada partida identifica el producto por `productId` (SKU) o `barcode`; las repetidas se suman.
+         *     El cobro se intenta después de registrar la venta: `PAID` o `FAILED` (adeudo visible en `pendingPayments` de `/reports/summary`).
+         *     Errores: 400 `VALIDATION_ERROR`, `INVALID_BODY`, `ITEM_CODE_REQUIRED`, `INVALID_EXITED_AT` (antes de la entrada o en el futuro) · 401 `INVALID_SIGNATURE` · 404 `VISIT_NOT_FOUND`, `PRODUCT_NOT_FOUND` · 409 `VISIT_CLOSED` (visita cerrada o abandonada), `EVENT_ID_CONFLICT` (el `eventId` ya cerró otra visita).
          */
         post: operations["handleCheckoutWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dev/simulate-visit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Simula una visita completa del cliente demo (entrada con QR + salida con productos al azar)
+         * @description Solo existe si `NODE_ENV ≠ production`. Usa al cliente `SEED_CUSTOMER_EMAIL`, elige de 1 a 4 productos activos (con stock si los hay)
+         *     y ejecuta los mismos casos de uso que `/store/entry` y `/webhooks/checkout`, incluido el cobro simulado.
+         *     Errores: 404 `SIMULATION_CUSTOMER_NOT_FOUND` · 422 `NO_PRODUCTS_AVAILABLE`.
+         */
+        post: operations["simulateStoreVisit"];
         delete?: never;
         options?: never;
         head?: never;
@@ -335,7 +374,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Historial cronológico de tickets */
+        /**
+         * Historial cronológico de tickets
+         * @description Rango opcional [from, to); 400 `INVALID_RANGE` si from ≥ to. Incluye ventas canceladas salvo que se filtre por `status`.
+         */
         get: operations["listSales"];
         put?: never;
         /**
@@ -394,7 +436,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancela la venta completa, repone stock y reembolsa (CARD_ON_FILE vía gateway) */
+        /**
+         * Cancela la venta completa, repone stock y reembolsa (CARD_ON_FILE vía gateway)
+         * @description En una transacción: repone el stock de cada partida con un movimiento `CANCELLATION` en el kardex y marca la venta como CANCELLED (fecha, usuario y motivo).
+         *     `paymentStatus` pasa de PAID a REFUNDED; los cobros PENDING o FAILED conservan su estado. 400 `INVALID_REASON` si el motivo tiene menos de 3 caracteres.
+         *     Si el pago fue `CARD_ON_FILE` y estaba PAID, el reembolso se pide a la pasarela dentro de la misma transacción: si la pasarela lo rechaza, responde 422 `REFUND_FAILED` y la venta queda sin cancelar.
+         */
         post: operations["cancelSale"];
         delete?: never;
         options?: never;
@@ -409,7 +456,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Métricas clave en un rango (el dashboard pide hoy y semana) */
+        /**
+         * Métricas clave en un rango (el dashboard pide hoy y semana)
+         * @description Rango semiabierto [from, to) sobre ventas COMPLETED (las canceladas no cuentan). Errores 400: `INVALID_RANGE` (from ≥ to o fecha inválida), `RANGE_TOO_LARGE` (más de 400 días).
+         *     `revenue` incluye ventas con cobro pendiente o fallido; esas además se suman en `pendingPayments`.
+         */
         get: operations["getReportSummary"];
         put?: never;
         post?: never;
@@ -426,7 +477,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Serie temporal de ventas y ganancia */
+        /**
+         * Serie temporal de ventas y ganancia
+         * @description Rango semiabierto [from, to) sobre ventas COMPLETED (las canceladas no cuentan). Errores 400: `INVALID_RANGE` (from ≥ to o fecha inválida), `RANGE_TOO_LARGE` (más de 400 días), o más de 1000 puntos para la granularidad elegida.
+         *     Los periodos se truncan en la zona horaria de la tienda (`STORE_TIMEZONE`, por defecto America/Mexico_City; semanas desde el lunes) y `bucket` es el instante de inicio del periodo. Los periodos sin ventas se incluyen en cero.
+         */
         get: operations["getSalesTrend"];
         put?: never;
         post?: never;
@@ -443,7 +498,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Productos de mayor rotación */
+        /**
+         * Productos de mayor rotación
+         * @description Rango semiabierto [from, to) sobre ventas COMPLETED (las canceladas no cuentan). Errores 400: `INVALID_RANGE` (from ≥ to o fecha inválida), `RANGE_TOO_LARGE` (más de 400 días).
+         *     `revenue` es IVA incluido; `netProfit` = Σ base sin IVA − Σ costo (snapshot de cada partida). Empates por nombre.
+         */
         get: operations["getTopProducts"];
         put?: never;
         post?: never;
@@ -460,14 +519,23 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Configuración general del negocio */
+        /**
+         * Configuración general del negocio
+         * @description Si la tienda aún no se configuró, devuelve los valores por defecto (sin `updatedAt`).
+         */
         get: operations["getSettings"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** Actualiza configuración general */
+        /**
+         * Actualiza configuración general
+         * @description Actualización parcial: los campos omitidos conservan su valor (no se aplican defaults).
+         *     Los textos se recortan; `legalName`, `phone` o `ticketFooter` vacíos se guardan como `null` y el RFC se guarda en mayúsculas.
+         *     En `peripherals` se reemplaza cada dispositivo enviado (`printer`, `barcodeScanner`, `cardTerminal`) y los omitidos conservan su configuración.
+         *     Los cambios de perfil se reflejan en los tickets (`GET /sales/{id}/receipt`) y `defaultTaxRate` en las altas de producto sin `taxRate`.
+         */
         patch: operations["updateSettings"];
         trace?: never;
     };
@@ -547,8 +615,8 @@ export interface components {
             visitId: string;
             user: {
                 /** Format: uuid */
-                id?: string;
-                name?: string;
+                id: string;
+                name: string;
             };
             /** Format: date-time */
             enteredAt: string;
@@ -572,9 +640,26 @@ export interface components {
             visitId: string;
             /** Format: uuid */
             saleId: string | null;
-            folio?: number | null;
-            totalAmount?: components["schemas"]["Money"];
-            paymentStatus?: components["schemas"]["PaymentStatus"];
+            folio: number | null;
+            totalAmount: components["schemas"]["Money"];
+            /** @description null si la visita se cerró sin venta */
+            paymentStatus: components["schemas"]["PaymentStatus"] | null;
+        };
+        SimulatedVisit: {
+            customer: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            /** Format: uuid */
+            visitId: string;
+            /** Format: uuid */
+            saleId: string | null;
+            folio: number | null;
+            totalAmount: components["schemas"]["Money"];
+            paymentStatus: components["schemas"]["PaymentStatus"] | null;
+            /** @description Piezas totales que se llevó */
+            itemCount: number;
         };
         Category: {
             /** Format: uuid */
@@ -632,8 +717,8 @@ export interface components {
             categoryId: string;
             price: components["schemas"]["Money"];
             purchaseCost: components["schemas"]["Money"];
-            /** @default 0.16 */
-            taxRate: components["schemas"]["TaxRate"];
+            /** @description Si se omite, se usa `defaultTaxRate` de `/settings` (0.16 si la tienda no está configurada). */
+            taxRate?: components["schemas"]["TaxRate"];
             /**
              * @description Genera movimiento RESTOCK
              * @default 0
@@ -788,19 +873,19 @@ export interface components {
         };
         Receipt: {
             business: {
-                name?: string;
-                legalName?: string | null;
-                rfc?: string | null;
-                address?: string;
-                phone?: string | null;
-                logoUrl?: string | null;
-                footer?: string | null;
+                name: string;
+                legalName: string | null;
+                rfc: string | null;
+                address: string;
+                phone: string | null;
+                logoUrl: string | null;
+                footer: string | null;
             };
             sale: components["schemas"]["SaleDetail"];
-            taxBreakdown?: {
-                rate?: components["schemas"]["TaxRate"];
-                base?: components["schemas"]["Money"];
-                tax?: components["schemas"]["Money"];
+            taxBreakdown: {
+                rate: components["schemas"]["TaxRate"];
+                base: components["schemas"]["Money"];
+                tax: components["schemas"]["Money"];
             }[];
             /** Format: date-time */
             printedAt: string;
@@ -812,23 +897,23 @@ export interface components {
             to: string;
             /** @description Σ total_amount (COMPLETED) */
             revenue: components["schemas"]["Money"];
-            taxCollected?: components["schemas"]["Money"];
+            taxCollected: components["schemas"]["Money"];
             /** @description Σ base − Σ unit_cost×qty */
             netProfit: number;
             transactions: number;
             averageTicket: components["schemas"]["Money"];
-            byType?: {
-                AUTOMATED?: {
-                    revenue?: components["schemas"]["Money"];
-                    transactions?: number;
+            byType: {
+                AUTOMATED: {
+                    revenue: components["schemas"]["Money"];
+                    transactions: number;
                 };
-                MANUAL?: {
-                    revenue?: components["schemas"]["Money"];
-                    transactions?: number;
+                MANUAL: {
+                    revenue: components["schemas"]["Money"];
+                    transactions: number;
                 };
             };
             /** @description Σ ventas con paymentStatus FAILED/PENDING */
-            pendingPayments?: components["schemas"]["Money"];
+            pendingPayments: components["schemas"]["Money"];
         };
         TrendPoint: {
             /** Format: date-time */
@@ -844,46 +929,52 @@ export interface components {
             revenue: components["schemas"]["Money"];
             netProfit: number;
         };
+        /** @description Cada dispositivo es opcional (ausente = sin configurar). */
         Peripherals: {
+            /** @description Impresora térmica ESC/POS. La prueba de impresión la hace el navegador (WebUSB / Web Bluetooth). */
             printer?: {
                 /** @enum {string} */
-                connection?: "BLUETOOTH" | "NETWORK" | "USB" | "NONE";
-                /** @description MAC, IP:puerto o vendorId:productId */
-                address?: string | null;
+                connection: "BLUETOOTH" | "NETWORK" | "USB" | "NONE";
+                /** @description MAC, IP:puerto o vendorId:productId (hex, p. ej. 0416:5011) */
+                address: string | null;
                 /** @enum {integer} */
-                paperWidthMm?: 58 | 80;
+                paperWidthMm: 58 | 80;
             };
             barcodeScanner?: {
                 /** @enum {string} */
-                mode?: "KEYBOARD_WEDGE" | "BLUETOOTH" | "CAMERA";
+                mode: "KEYBOARD_WEDGE" | "BLUETOOTH" | "CAMERA";
             };
             cardTerminal?: {
-                provider?: string | null;
-                terminalId?: string | null;
+                provider: string | null;
+                terminalId: string | null;
             };
         };
         StoreSettings: {
             businessName: string;
-            legalName?: string | null;
-            rfc?: string | null;
+            legalName: string | null;
+            rfc: string | null;
             address: string;
-            phone?: string | null;
+            phone: string | null;
             /** Format: uri */
-            logoUrl?: string | null;
+            logoUrl: string | null;
             /** @constant */
             currency: "MXN";
             defaultTaxRate: components["schemas"]["TaxRate"];
             /** @constant */
             pricesIncludeTax: true;
-            ticketFooter?: string | null;
+            ticketFooter: string | null;
             peripherals: components["schemas"]["Peripherals"];
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description Ausente si la tienda aún no se configuró
+             */
             updatedAt?: string;
         };
         /** @description Cualquier subconjunto de StoreSettings excepto currency, pricesIncludeTax y updatedAt. */
         StoreSettingsUpdate: {
             businessName?: string;
             legalName?: string | null;
+            /** @description 12 caracteres (persona moral) o 13 (persona física); se guarda en mayúsculas */
             rfc?: string | null;
             address?: string;
             phone?: string | null;
@@ -1187,6 +1278,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description Cuenta desactivada (ACCOUNT_DISABLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Token ya utilizado (ENTRY_TOKEN_REUSED) */
             409: {
                 headers: {
@@ -1239,8 +1339,40 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Visita ya cerrada con otro eventId */
+            /** @description Visita ya cerrada con otro eventId (VISIT_CLOSED) o eventId de otra visita (EVENT_ID_CONFLICT) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    simulateStoreVisit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visita simulada */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulatedVisit"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description NO_PRODUCTS_AVAILABLE */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1794,6 +1926,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description REFUND_FAILED (la pasarela rechazó el reembolso) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getReportSummary: {
@@ -1921,7 +2062,15 @@ export interface operations {
                     "application/json": components["schemas"]["StoreSettings"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Validación fallida (`VALIDATION_ERROR`, p. ej. RFC con formato inválido) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };

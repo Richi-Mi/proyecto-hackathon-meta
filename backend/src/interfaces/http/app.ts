@@ -6,16 +6,23 @@ import type { CategoryUseCases } from '../../application/categories/category.use
 import type { CustomerUseCases } from '../../application/customers/customer.use-cases'
 import type { InventoryUseCases } from '../../application/inventory/inventory.use-cases'
 import type { ProductUseCases } from '../../application/products/product.use-cases'
+import type { ReportUseCases } from '../../application/reports/report.use-cases'
 import type { SaleUseCases } from '../../application/sales/sale.use-cases'
+import type { SettingsUseCases } from '../../application/settings/settings.use-cases'
+import type { StoreUseCases } from '../../application/store/store.use-cases'
 import { createAuthPlugin } from './plugins/auth.plugin'
 import { errorHandler } from './plugins/error-handler'
 import { authRoutes } from './routes/auth.routes'
 import { categoryRoutes } from './routes/category.routes'
 import { customerRoutes } from './routes/customer.routes'
+import { devRoutes } from './routes/dev.routes'
 import { healthRoutes } from './routes/health.routes'
 import { inventoryRoutes } from './routes/inventory.routes'
 import { productRoutes } from './routes/product.routes'
+import { reportRoutes } from './routes/report.routes'
 import { saleRoutes } from './routes/sale.routes'
+import { settingsRoutes } from './routes/settings.routes'
+import { storeRoutes } from './routes/store.routes'
 
 export interface AppDependencies {
   useCases: {
@@ -25,12 +32,17 @@ export interface AppDependencies {
     products: ProductUseCases
     inventory: InventoryUseCases
     sales: SaleUseCases
+    reports: ReportUseCases
+    settings: SettingsUseCases
+    store: StoreUseCases
   }
   checkDatabase: () => Promise<boolean>
   config: {
     jwtSecret: string
     jwtExpiresInSeconds: number
     corsOrigins: string[]
+    /** Monta `/dev/*` (simulador de visitas). Nunca en producción. */
+    devTools?: boolean
     /** Plugin de OpenTelemetry; se omite si la telemetría está desactivada. */
     telemetry?: AnyElysia
   }
@@ -47,6 +59,10 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
     .use(productRoutes(auth, useCases.products))
     .use(inventoryRoutes(auth, useCases.inventory))
     .use(saleRoutes(auth, useCases.sales))
+    .use(reportRoutes(auth, useCases.reports))
+    .use(settingsRoutes(auth, useCases.settings))
+    .use(storeRoutes(useCases.store))
+    .use(config.devTools ? devRoutes(auth, useCases.store) : new Elysia({ name: 'dev-tools-disabled' }))
 
   return new Elysia()
     .use(config.telemetry ?? new Elysia({ name: 'telemetry-disabled' }))
@@ -59,7 +75,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
         documentation: {
           info: {
             title: 'Smart Abarrotes API',
-            version: '1.0.2',
+            version: '1.0.6',
             description:
               'Endpoints implementados. El contrato completo (fuente de verdad SDD) está en docs/specs/openapi.yaml.',
           },
@@ -71,10 +87,16 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
             { name: 'Products' },
             { name: 'Inventory' },
             { name: 'Sales' },
+            { name: 'Reports' },
+            { name: 'Settings' },
+            { name: 'Store Devices', description: 'Escáner de entrada y sistema de cámaras' },
+            { name: 'Dev', description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production' },
           ],
           components: {
             securitySchemes: {
               bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+              deviceKey: { type: 'apiKey', in: 'header', name: 'X-Device-Key' },
+              webhookSignature: { type: 'apiKey', in: 'header', name: 'X-Signature' },
             },
           },
         },

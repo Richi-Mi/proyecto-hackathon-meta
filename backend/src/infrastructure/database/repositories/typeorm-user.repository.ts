@@ -24,6 +24,14 @@ export class TypeOrmUserRepository implements UserRepository {
       .getOne()
   }
 
+  findByEmail(email: string): Promise<User | null> {
+    return this.repo.findOneBy({ email })
+  }
+
+  async setPaymentCustomerRef(id: string, ref: string): Promise<void> {
+    await this.repo.update({ id }, { paymentCustomerRef: ref })
+  }
+
   async create(data: NewUser): Promise<User> {
     try {
       const { passwordHash: _, ...user } = await this.repo.save(this.repo.create(data))

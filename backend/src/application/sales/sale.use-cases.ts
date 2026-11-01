@@ -1,9 +1,14 @@
-import { PaymentMethod, PaymentStatus, ProductStatus, Role, SaleType } from '../../domain/enums'
+import { PaymentMethod, PaymentStatus, ProductStatus, Role, SaleStatus, SaleType } from '../../domain/enums'
 import { ConflictError, InvalidInputError, NotFoundError, UnprocessableError } from '../../domain/errors'
 import { roundMoney } from '../../domain/money'
+import type { BusinessProfile } from '../../domain/models/business-profile'
 import type { Sale } from '../../domain/models/sale'
-import { priceLine, priceSale } from '../../domain/sales/pricing'
-import type { LockedProduct, SaleDraft, SaleRepository } from '../ports/sale-repository'
+import { toBusinessProfile } from '../../domain/models/store-settings'
+import { priceLine, priceSale, taxBreakdown, type TaxBreakdownLine } from '../../domain/sales/pricing'
+import type { Page, PageRequest } from '../common/pagination'
+import type { PaymentGateway } from '../ports/payment-gateway'
+import type { LockedProduct, SaleDraft, SaleFilters, SaleRepository } from '../ports/sale-repository'
+import type { StoreSettingsRepository } from '../ports/store-settings-repository'
 import type { UserRepository } from '../ports/user-repository'
 
 export interface ManualSaleInput {
@@ -21,16 +26,73 @@ export interface ManualSaleOptions {
   at?: Date
 }
 
+export interface Receipt {
+  business: BusinessProfile
+  sale: Sale
+  taxBreakdown: TaxBreakdownLine[]
+  printedAt: Date
+}
+
 export class SaleUseCases {
   constructor(
     private readonly sales: SaleRepository,
     private readonly users: UserRepository,
+    private readonly settings: StoreSettingsRepository,
+    private readonly gateway: PaymentGateway,
   ) {}
+
+  list(filters: SaleFilters, page: PageRequest): Promise<Page<Sale>> {
+    if (filters.from && filters.to && filters.from >= filters.to) {
+      throw new InvalidInputError('INVALID_RANGE', '`from` debe ser anterior a `to`')
+    }
+    return this.sales.list(filters, page)
+  }
 
   async getById(id: string): Promise<Sale> {
     const sale = await this.sales.findById(id)
     if (!sale) throw new NotFoundError('SALE_NOT_FOUND', `No existe la venta ${id}`)
     return sale
+  }
+
+  /** Datos para reimprimir el ticket: negocio, venta y desglose de IVA por tasa. */
+  async getReceipt(id: string): Promise<Receipt> {
+    const [sale, settings] = await Promise.all([this.getById(id), this.settings.get()])
+    return { business: toBusinessProfile(settings), sale, taxBreakdown: taxBreakdown(sale.items), printedAt: new Date() }
+  }
+
+  /**
+   * Cancela la venta completa: repone el stock y marca el pago como reembolsado. Un cobro CARD_ON_FILE se reembolsa
+   * en la pasarela dentro de la transacción (con la venta bloqueada: no hay doble reembolso); si falla, no se cancela.
+   */
+  async cancel(id: string, actorId: string, reason: string): Promise<Sale> {
+    const trimmed = reason.trim()
+    if (trimmed.length < 3) throw new InvalidInputError('INVALID_REASON', 'Indica el motivo de la cancelación')
+
+    const cancelled = await this.sales.cancel(id, async (sale) => {
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new ConflictError('SALE_ALREADY_CANCELLED', `El ticket #${sale.folio} ya estaba cancelado`)
+      }
+      if (sale.paymentMethod === PaymentMethod.CARD_ON_FILE && sale.paymentStatus === PaymentStatus.PAID) {
+        await this.refund(sale)
+      }
+      return {
+        cancelledById: actorId,
+        reason: trimmed,
+        paymentStatus: sale.paymentStatus === PaymentStatus.PAID ? PaymentStatus.REFUNDED : sale.paymentStatus,
+      }
+    })
+    if (!cancelled) throw new NotFoundError('SALE_NOT_FOUND', `No existe la venta ${id}`)
+    return cancelled
+  }
+
+  private async refund(sale: Sale) {
+    try {
+      if (!sale.paymentReference) throw new Error('La venta no tiene referencia de cobro')
+      await this.gateway.refund({ transactionId: sale.paymentReference, amount: sale.totalAmount, reference: sale.id })
+    } catch (error) {
+      console.error(`Reembolso del ticket #${sale.folio} rechazado`, error)
+      throw new UnprocessableError('REFUND_FAILED', `La pasarela no pudo reembolsar el ticket #${sale.folio}; intenta de nuevo`)
+    }
   }
 
   /** Venta de mostrador: precios e impuestos se calculan con los datos bloqueados en la base, nunca con los del cliente. */

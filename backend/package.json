@@ -13,7 +13,9 @@
     "db:generate": "bun run typeorm migration:generate -d src/infrastructure/database/data-source.ts",
     "db:show": "bun run typeorm migration:show -d src/infrastructure/database/data-source.ts",
     "db:seed": "bun src/infrastructure/database/seed.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "check:contract": "bun scripts/check-contract.ts",
+    "simulate:store": "bun scripts/simulate-store.ts"
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",

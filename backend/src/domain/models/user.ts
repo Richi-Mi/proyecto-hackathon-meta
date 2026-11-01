@@ -6,6 +6,8 @@ export interface User {
   email: string
   role: Role
   isActive: boolean
+  /** Referencia del cliente en la pasarela de pago (token, nunca datos de tarjeta) */
+  paymentCustomerRef: string | null
   createdAt: Date
   updatedAt: Date
 }

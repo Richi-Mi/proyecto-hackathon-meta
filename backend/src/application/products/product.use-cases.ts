@@ -1,11 +1,13 @@
 import { ProductStatus } from '../../domain/enums'
 import { ConflictError, InvalidInputError, NotFoundError } from '../../domain/errors'
 import { roundMoney, roundRate } from '../../domain/money'
-import { DEFAULT_MIN_STOCK_ALERT, DEFAULT_TAX_RATE, type Product } from '../../domain/models/product'
+import { DEFAULT_MIN_STOCK_ALERT, type Product } from '../../domain/models/product'
 import { assertHasChanges } from '../common/assert-has-changes'
 import type { Page, PageRequest } from '../common/pagination'
+import { emptyToNull } from '../common/text'
 import type { CategoryRepository } from '../ports/category-repository'
 import type { NewProduct, ProductChanges, ProductFilters, ProductRepository } from '../ports/product-repository'
+import type { StoreSettingsRepository } from '../ports/store-settings-repository'
 
 export type CreateProductInput = Pick<NewProduct, 'id' | 'name' | 'categoryId' | 'price' | 'purchaseCost'> &
   Partial<Omit<NewProduct, 'id' | 'name' | 'categoryId' | 'price' | 'purchaseCost'>> & {
@@ -16,6 +18,7 @@ export class ProductUseCases {
   constructor(
     private readonly products: ProductRepository,
     private readonly categories: CategoryRepository,
+    private readonly settings: StoreSettingsRepository,
   ) {}
 
   list(filters: ProductFilters, page: PageRequest): Promise<Page<Product>> {
@@ -39,6 +42,7 @@ export class ProductUseCases {
     }
 
     const initialStock = input.initialStock ?? 0
+    const taxRate = input.taxRate ?? (await this.settings.get()).defaultTaxRate
     return this.products.create(
       {
         id: input.id,
@@ -48,7 +52,7 @@ export class ProductUseCases {
         categoryId: input.categoryId,
         price: roundMoney(input.price),
         purchaseCost: roundMoney(input.purchaseCost),
-        taxRate: roundRate(input.taxRate ?? DEFAULT_TAX_RATE),
+        taxRate: roundRate(taxRate),
         minStockAlert: input.minStockAlert ?? DEFAULT_MIN_STOCK_ALERT,
         status: input.status ?? ProductStatus.ACTIVE,
         imageUrl: emptyToNull(input.imageUrl),
@@ -90,4 +94,3 @@ const throwProductNotFound = (id: string): never => {
   throw new NotFoundError('PRODUCT_NOT_FOUND', `No existe el producto ${id}`)
 }
 
-const emptyToNull = (value: string | null | undefined) => (value?.trim() ? value.trim() : null)

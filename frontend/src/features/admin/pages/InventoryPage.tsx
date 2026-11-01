@@ -1,4 +1,4 @@
-import { AlertTriangle, Boxes, ChevronLeft, ChevronRight, Package, Search, Wallet } from 'lucide-react'
+import { AlertTriangle, Boxes, ChevronLeft, ChevronRight, Package, Plus, Search, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,13 @@ import { formatMoney } from '@/lib/format'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
 import { fetchCategories, fetchInventorySummary, fetchProducts } from '../api'
 import { KpiCard } from '../components/KpiCard'
-import { ProductTable, type SortValue } from '../inventory/ProductTable'
+import type { Product } from '@/lib/api/types'
+import { DeleteProductDialog } from '../inventory/DeleteProductDialog'
+import { MovementsSheet } from '../inventory/MovementsSheet'
+import { ProductFormSheet } from '../inventory/ProductFormSheet'
+import { ProductTable, type ProductAction, type SortValue } from '../inventory/ProductTable'
+import { FALLBACK_TAX_RATE, useSettingsStore } from '../settings/settings-store'
+import { StockAdjustmentDialog, type StockMode } from '../inventory/StockAdjustmentDialog'
 
 const PAGE_SIZE = 20
 const ALL_CATEGORIES = 'all'
@@ -27,6 +33,13 @@ export function InventoryPage() {
   const [page, setPage] = useState(1)
   const debouncedSearch = useDebouncedValue(search.trim(), 300)
 
+  // Diálogos de acciones sobre productos
+  const [form, setForm] = useState<{ product: Product | null } | null>(null)
+  const [stockTarget, setStockTarget] = useState<{ product: Product; mode: StockMode } | null>(null)
+  const [movementsOf, setMovementsOf] = useState<Product | null>(null)
+  const [deleting, setDeleting] = useState<Product | null>(null)
+
+  const defaultTaxRate = useSettingsStore((state) => state.settings?.defaultTaxRate) ?? FALLBACK_TAX_RATE
   const summary = useApiQuery(fetchInventorySummary, [])
   const categories = useApiQuery(fetchCategories, [])
   const products = useApiQuery(
@@ -44,6 +57,19 @@ export function InventoryPage() {
       ),
     [page, sort, debouncedSearch, categoryId, lowStockOnly],
   )
+
+  /** Tras cualquier cambio: tabla y KPIs al día */
+  const refresh = () => {
+    products.reload()
+    summary.reload()
+  }
+  const handleAction = (action: ProductAction, product: Product) => {
+    if (action === 'edit') setForm({ product })
+    if (action === 'restock') setStockTarget({ product, mode: 'RESTOCK' })
+    if (action === 'adjust') setStockTarget({ product, mode: 'ADJUSTMENT' })
+    if (action === 'movements') setMovementsOf(product)
+    if (action === 'delete') setDeleting(product)
+  }
 
   const total = products.data?.meta.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -116,6 +142,9 @@ export function InventoryPage() {
             Solo stock bajo
           </Label>
         </div>
+        <Button className="ml-auto" onClick={() => setForm({ product: null })}>
+          <Plus /> Nuevo producto
+        </Button>
       </div>
 
       {products.error ? (
@@ -126,7 +155,13 @@ export function InventoryPage() {
           </Button>
         </div>
       ) : (
-        <ProductTable products={products.data?.data} sort={sort} onSortChange={resetPage(setSort)} loading={products.loading} />
+        <ProductTable
+          products={products.data?.data}
+          sort={sort}
+          onSortChange={resetPage(setSort)}
+          onAction={handleAction}
+          loading={products.loading}
+        />
       )}
 
       <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
@@ -145,6 +180,19 @@ export function InventoryPage() {
           </Button>
         </div>
       </div>
+
+      <ProductFormSheet
+        open={form !== null}
+        product={form?.product ?? null}
+        onOpenChange={(open) => !open && setForm(null)}
+        categories={categories.data ?? []}
+        defaultTaxRate={defaultTaxRate}
+        onCategoryCreated={categories.reload}
+        onSaved={refresh}
+      />
+      <StockAdjustmentDialog target={stockTarget} onClose={() => setStockTarget(null)} onDone={refresh} />
+      <MovementsSheet product={movementsOf} onClose={() => setMovementsOf(null)} />
+      <DeleteProductDialog product={deleting} onClose={() => setDeleting(null)} onDeleted={refresh} />
     </div>
   )
 }

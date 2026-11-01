@@ -46,7 +46,6 @@ const editableFields = {
 export const ProductCreate = t.Object({
   id: Sku,
   ...editableFields,
-  taxRate: t.Optional(t.Number({ ...TaxRate, default: 0.16 })),
   minStockAlert: t.Optional(t.Integer({ minimum: 0, default: 5 })),
   status: t.Optional(t.Enum(ProductStatus, { default: ProductStatus.ACTIVE })),
   isQuickAccess: t.Optional(t.Boolean({ default: false })),

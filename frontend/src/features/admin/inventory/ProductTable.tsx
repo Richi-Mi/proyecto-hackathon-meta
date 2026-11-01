@@ -1,10 +1,20 @@
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, History, MoreHorizontal, PackagePlus, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { Product } from '@/lib/api/types'
 import { formatMoney, formatRate } from '@/lib/format'
 import { cn } from '@/lib/utils'
+
+export type ProductAction = 'edit' | 'restock' | 'adjust' | 'movements' | 'delete'
 
 export type SortField = 'name' | 'price' | 'stock'
 export type SortValue = SortField | `-${SortField}`
@@ -19,10 +29,11 @@ interface ProductTableProps {
   products: Product[] | undefined
   sort: SortValue
   onSortChange: (sort: SortValue) => void
+  onAction: (action: ProductAction, product: Product) => void
   loading: boolean
 }
 
-export function ProductTable({ products, sort, onSortChange, loading }: ProductTableProps) {
+export function ProductTable({ products, sort, onSortChange, onAction, loading }: ProductTableProps) {
   const sortHeader = (field: SortField, label: string, className?: string) => {
     const active = sort.replace('-', '') === field
     const descending = sort.startsWith('-')
@@ -54,20 +65,23 @@ export function ProductTable({ products, sort, onSortChange, loading }: ProductT
             <TableHead className="text-right">IVA</TableHead>
             {sortHeader('stock', 'Stock', 'text-right')}
             <TableHead>Estado</TableHead>
+            <TableHead className="w-12">
+              <span className="sr-only">Acciones</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {!products &&
             Array.from({ length: 8 }, (_, i) => (
               <TableRow key={i}>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={9}>
                   <Skeleton className="h-6 w-full" />
                 </TableCell>
               </TableRow>
             ))}
           {products?.length === 0 && (
             <TableRow>
-              <TableCell colSpan={8} className="h-28 text-center text-muted-foreground">
+              <TableCell colSpan={9} className="h-28 text-center text-muted-foreground">
                 Ningún producto coincide con los filtros.
               </TableCell>
             </TableRow>
@@ -76,8 +90,14 @@ export function ProductTable({ products, sort, onSortChange, loading }: ProductT
             <TableRow key={product.id}>
               <TableCell className="font-mono text-xs">{product.id}</TableCell>
               <TableCell>
-                <div className="grid">
-                  <span className="font-medium">{product.name}</span>
+                <div className="grid justify-items-start">
+                  <button
+                    type="button"
+                    onClick={() => onAction('edit', product)}
+                    className="text-left font-medium underline-offset-4 hover:underline"
+                  >
+                    {product.name}
+                  </button>
                   {product.barcode && <span className="font-mono text-xs text-muted-foreground">{product.barcode}</span>}
                 </div>
               </TableCell>
@@ -115,6 +135,33 @@ export function ProductTable({ products, sort, onSortChange, loading }: ProductT
                 <span className={cn('rounded-md px-2 py-0.5 text-xs font-medium', STATUS_LABEL[product.status].className)}>
                   {STATUS_LABEL[product.status].label}
                 </span>
+              </TableCell>
+              <TableCell>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon-sm" aria-label={`Acciones para ${product.name}`}>
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem onSelect={() => onAction('edit', product)}>
+                      <Pencil /> Editar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onAction('restock', product)}>
+                      <PackagePlus /> Entrada de mercancía
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onAction('adjust', product)}>
+                      <SlidersHorizontal /> Ajustar stock
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onAction('movements', product)}>
+                      <History /> Ver movimientos
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive" onSelect={() => onAction('delete', product)}>
+                      <Trash2 /> Dar de baja
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </TableCell>
             </TableRow>
           ))}

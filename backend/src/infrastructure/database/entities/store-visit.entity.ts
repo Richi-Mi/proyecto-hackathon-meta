@@ -15,6 +15,8 @@ import { UserEntity } from './user.entity'
 
 /** Visita a la tienda física: se abre al escanear el QR y se cierra con el webhook de salida. */
 @Entity('store_visits')
+// Como máximo una visita ACTIVE por cliente (al volver a entrar, la anterior pasa a ABANDONED)
+@Index('UQ_store_visits_active_user', ['userId'], { unique: true, where: `"status" = 'ACTIVE'` })
 export class StoreVisitEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string
@@ -42,6 +44,11 @@ export class StoreVisitEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   exitedAt!: Date | null
+
+  /** `eventId` del webhook que cerró la visita: idempotencia aunque la salida no genere venta. */
+  @Index('UQ_store_visits_exit_event_id', { unique: true })
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  exitEventId!: string | null
 
   @OneToOne(() => SaleEntity, (sale) => sale.visit)
   sale?: Relation<SaleEntity> | null

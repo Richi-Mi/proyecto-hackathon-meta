@@ -1,6 +1,7 @@
 import type { DataSource } from 'typeorm'
 import { createContainer, type Container } from '../../container'
 import { PaymentMethod, ProductStatus, Role } from '../../domain/enums'
+import { DEFAULT_STORE_SETTINGS } from '../../domain/models/store-settings'
 import { normalizeEmail } from '../../domain/models/user'
 import { priceSale } from '../../domain/sales/pricing'
 import { StoreSettingsEntity } from './entities'
@@ -74,7 +75,8 @@ export async function runSeed(dataSource: DataSource, options: SeedOptions) {
 
   const settings = dataSource.getRepository(StoreSettingsEntity)
   if (!(await settings.existsBy({ id: 1 }))) {
-    await settings.insert({ id: 1, businessName: 'Smart Abarrotes', address: 'Dirección por configurar', peripherals: {} })
+    const { updatedAt: _omit, ...defaults } = DEFAULT_STORE_SETTINGS
+    await settings.insert({ id: 1, ...defaults })
     log.push('Configuración de la tienda creada')
   }
 
@@ -118,6 +120,13 @@ export async function runSeed(dataSource: DataSource, options: SeedOptions) {
     }
     customerId = existing?.id ?? (await useCases.auth.registerCustomer({ ...options.customer, email })).id
     if (!existing) log.push(`Cliente demo creado: ${email}`)
+    // Clientes demo creados antes del flujo automático: se les vincula el método de pago simulado
+    if (existing && !existing.paymentCustomerRef) {
+      const { passwordHash: _, ...customer } = existing
+      if ((await useCases.auth.linkPaymentMethod(customer)).paymentCustomerRef) {
+        log.push(`Cliente demo vinculado a la pasarela de pago: ${email}`)
+      }
+    }
   }
 
   if (options.withDemoSales && (await repositories.sales.count()) === 0) {
