@@ -1,8 +1,9 @@
-import { ArrowDown, CalendarDays, CircleCheck, ScanEye, Sparkles } from 'lucide-react'
+import { ArrowDown, CircleCheck, ScanEye, Sparkles } from 'lucide-react'
 import { motion } from 'motion/react'
 import { NAV_LINKS, SOURCES } from '../content'
 import { EASE_OUT } from '../motion-presets'
 import { HeroShelf } from './ShelfArt'
+import { EntryLinks } from './EntryLinks'
 import { BrandMark, Tag } from './primitives'
 
 export function ShelfSightHero() {
@@ -13,7 +14,7 @@ export function ShelfSightHero() {
           <a href="#inicio" aria-label="ShelfSight, inicio">
             <BrandMark />
           </a>
-          <ul className="hidden items-center gap-7 text-[0.95rem] text-(--sf-hero-muted) md:flex">
+          <ul className="hidden items-center gap-6 text-[0.95rem] text-(--sf-hero-muted) xl:flex">
             {NAV_LINKS.map(({ href, label }) => (
               <li key={href}>
                 <a className="transition-colors hover:text-(--sf-hero-ink)" href={href}>
@@ -22,13 +23,7 @@ export function ShelfSightHero() {
               </li>
             ))}
           </ul>
-          <a
-            href="#plan"
-            className="inline-flex items-center gap-2 rounded-[8px] border border-(--sf-hero-line) px-3.5 py-2 text-sm font-semibold hover:border-(--sf-accent)"
-          >
-            <CalendarDays className="size-4" strokeWidth={1.75} aria-hidden />
-            Plan de 10 días
-          </a>
+          <EntryLinks />
         </nav>
 
         <div id="inicio" className="grid items-center gap-12 pt-8 pb-20 md:grid-cols-[1fr_1.05fr] md:pt-12">

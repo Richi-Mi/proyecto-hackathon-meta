@@ -1,41 +1,54 @@
 /*
- * Landing de ShelfSight (/shelfsight).
- * Todo vive bajo `.sf` para no tocar el tema global de la app (shadcn).
+ * Landing de ShelfSight (página de inicio, /).
+ * Todo vive bajo `.sf`; los tokens `--sf-*` se derivan del tema del sistema (index.css): neutros de shadcn,
+ * primario esmeralda y la paleta de gráficas. Así la landing y la app se ven como un mismo producto.
  * La página se lee como un anaquel visto por la cámara: las etiquetas de precio abren cada sección
- * y los recuadros de detección de SAM 3.1 son el único elemento llamativo.
+ * y los recuadros de detección de SAM 3.1 son el único elemento llamativo (color primario).
  */
 .sf {
-  --sf-bg: #f1f3f6;
-  --sf-surface: #ffffff;
-  --sf-surface-2: #e5e9f0;
-  --sf-ink: #121b2e;
-  --sf-muted: #4b566b;
-  --sf-line: #ccd3de;
-  --sf-accent: #f5b700;
-  --sf-accent-ink: #121b2e;
-  --sf-accent-soft: #fcefc2;
-  --sf-exit: #c2410c;
-  --sf-exit-ink: #ffffff;
-  --sf-entry: #0f7b5f;
-  --sf-hero-bg: #121b2e;
-  --sf-hero-ink: #f1f3f6;
-  --sf-hero-muted: #a9b4c7;
-  --sf-hero-line: #33415f;
-  --sf-shelf-back: #1b2742;
-  --sf-board: #3a4a6c;
-  --sf-upright: #24314f;
-  --sf-floor: #0e1525;
-  --sf-p1: #c8553d;
-  --sf-p2: #3d8fb5;
-  --sf-p3: #5e9e7e;
-  --sf-p4: #8c6a9e;
-  --sf-cap: #e9edf3;
-  --sf-metal: #c9d1dd;
-  --sf-crimp: #2a3550;
-  --sf-prod-label: #f3f5f8;
-  --sf-bar: #dde3ec;
-  --sf-bar-edge: #bcc6d4;
-  --sf-shadow: rgb(10 16 30 / 0.18);
+  /* Superficies y texto: tokens semánticos del tema */
+  --sf-bg: var(--muted);
+  --sf-surface: var(--card);
+  --sf-surface-2: oklch(0.922 0 0); /* neutral-200, mismo tono que --border */
+  --sf-ink: var(--foreground);
+  --sf-muted: var(--muted-foreground);
+  --sf-line: var(--border);
+
+  /* Acento = primario esmeralda; salida de producto = destructive; entrada = primario */
+  --sf-accent: var(--primary);
+  --sf-accent-ink: var(--primary-foreground);
+  --sf-accent-soft: color-mix(in oklch, var(--primary) 14%, var(--card));
+  --sf-exit: var(--destructive);
+  --sf-exit-ink: var(--primary-foreground);
+  --sf-entry: var(--primary);
+
+  /* Hero y pie: los neutros del tema oscuro del sistema */
+  --sf-hero-bg: oklch(0.145 0 0);
+  --sf-hero-ink: oklch(0.985 0 0);
+  --sf-hero-muted: oklch(0.708 0 0);
+  --sf-hero-line: oklch(0.269 0 0);
+
+  /* Ilustración del anaquel: escala neutral */
+  --sf-shelf-back: oklch(0.205 0 0);
+  --sf-board: oklch(0.371 0 0);
+  --sf-upright: oklch(0.269 0 0);
+  --sf-floor: oklch(0.145 0 0);
+  --sf-cap: oklch(0.922 0 0);
+  --sf-metal: oklch(0.87 0 0);
+  --sf-crimp: oklch(0.269 0 0);
+  --sf-prod-label: oklch(0.97 0 0);
+
+  /* Productos: paleta de gráficas del sistema (--chart-5, 3, 2 y 4 del tema claro; el esmeralda queda para las detecciones) */
+  --sf-p1: oklch(0.645 0.246 16.439);
+  --sf-p2: oklch(0.588 0.158 241.966);
+  --sf-p3: oklch(0.769 0.188 70.08);
+  --sf-p4: oklch(0.541 0.281 293.009);
+
+  /* Cronograma */
+  --sf-bar: var(--muted);
+  --sf-bar-edge: oklch(0.87 0 0);
+
+  --sf-shadow: oklch(0.145 0 0 / 0.14);
   --sf-tag-hole: var(--sf-bg);
   --sf-font-display: 'Archivo Variable', 'Arial Narrow', system-ui, sans-serif;
   --sf-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -48,31 +61,26 @@
 
 /* Modo oscuro: sigue la misma clase `.dark` que usa el resto de la app */
 .dark .sf {
-  --sf-bg: #0c1322;
-  --sf-surface: #141d30;
-  --sf-surface-2: #1b2640;
-  --sf-ink: #e7ecf4;
-  --sf-muted: #a3aec2;
-  --sf-line: #2a3652;
-  --sf-accent-soft: #3a3115;
-  --sf-exit: #ff8a5b;
-  --sf-exit-ink: #1a0d05;
-  --sf-entry: #43cfa0;
-  --sf-hero-bg: #080d18;
-  --sf-hero-ink: #eef2f8;
-  --sf-hero-muted: #9aa6bb;
-  --sf-hero-line: #2a3652;
-  --sf-shelf-back: #131c31;
-  --sf-board: #2f3d5c;
-  --sf-upright: #1c2742;
-  --sf-floor: #060a13;
-  --sf-cap: #d9dfe8;
-  --sf-metal: #aeb8c7;
-  --sf-crimp: #222c44;
-  --sf-prod-label: #e3e8ef;
-  --sf-bar: #22304d;
-  --sf-bar-edge: #33456b;
-  --sf-shadow: rgb(0 0 0 / 0.45);
+  --sf-bg: var(--background);
+  --sf-surface: var(--card);
+  --sf-surface-2: var(--muted);
+  /* En el tema oscuro --primary es neutro: el acento se mantiene esmeralda (el --ring del tema claro) */
+  --sf-accent: oklch(0.696 0.17 162.48);
+  --sf-accent-ink: oklch(0.145 0 0);
+  --sf-accent-soft: color-mix(in oklch, oklch(0.696 0.17 162.48) 18%, var(--card));
+  --sf-exit-ink: oklch(0.145 0 0);
+  --sf-entry: oklch(0.696 0.17 162.48);
+  --sf-hero-bg: oklch(0.205 0 0);
+  --sf-hero-line: oklch(0.371 0 0);
+  --sf-shelf-back: oklch(0.269 0 0);
+  --sf-board: oklch(0.439 0 0);
+  --sf-upright: oklch(0.371 0 0);
+  --sf-floor: oklch(0.205 0 0);
+  --sf-crimp: oklch(0.371 0 0);
+  --sf-prod-label: oklch(0.922 0 0);
+  --sf-bar: var(--muted);
+  --sf-bar-edge: oklch(0.371 0 0);
+  --sf-shadow: oklch(0 0 0 / 0.45);
   color-scheme: dark;
 }
 
@@ -254,7 +262,7 @@
 
 .sf a:focus-visible,
 .sf button:focus-visible {
-  outline: 3px solid var(--sf-accent);
+  outline: 3px solid var(--ring);
   outline-offset: 3px;
   border-radius: 6px;
 }

@@ -32,7 +32,7 @@ backend/   Bun + ElysiaJS + TypeORM 1.x (PostgreSQL 18) · Clean Architecture
   scripts/check-contract.ts  compara rutas implementadas vs contrato
   scripts/simulate-store.ts  visita completa por HTTP (QR → escáner → webhook firmado): bun run simulate:store
 frontend/  React 19 + Vite 8 + TS 7 + Tailwind v4 + Shadcn (radix-nova) + React Router 8 + Zustand + Axios
-  src/features/{auth,customer,admin,landing}/   pantallas por portal
+  src/features/{auth,customer,admin,shelfsight}/   pantallas por portal (shelfsight = landing pública)
   src/lib/api/schema.d.ts   tipos GENERADOS del contrato (bun run gen:api) — no editar a mano
   src/components/ticket/TicketView.tsx  ticket compartido (POS, reimpresión, cliente)
 docker-compose.yml  postgres:18 + otel-collector + jaeger (UI en :16686)
@@ -82,7 +82,7 @@ bunx --bun @redocly/cli@1 lint docs/specs/openapi.yaml     # desde la raíz
 | Especificación | OpenAPI + ERD + arquitectura; documentado en Notion (página "Hackathon Meta", **todavía con el contrato v1.0.0**) |
 | Bloques 1–2 | Entidades/migraciones, auth (argon2id + JWT), categorías, productos, inventario (ajustes, kardex, resumen), errores uniformes, OTel, Swagger, seed |
 | Bloque 3 | Frontend base: PWA, router por portal (sesión separada cliente/admin), layouts, login/registro |
-| Landing | `/` con animación de Anime.js sincronizada al scroll |
+| Landing | `/` = landing de ShelfSight (PR #1, Motion), con los colores del sistema (tokens `--sf-*` derivados de `index.css`); `/shelfsight` redirige a `/`. La landing anterior (Anime.js) se eliminó |
 | Bloque 4 | `GET /me/entry-pass` (QR con JWT de 60 s), `POST /sales` (idempotente), pantallas: QR, dashboard, inventario, POS |
 | Paso 1 | Alta/edición de productos, entradas de mercancía, mermas, kardex, baja lógica (solo frontend) |
 | Paso 2 | `/reports/summary`, `/reports/sales-trend`, `/reports/top-products` + dashboard con datos reales (hora local de la tienda) |

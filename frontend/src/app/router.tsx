@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { createBrowserRouter } from 'react-router'
+import { createBrowserRouter, Navigate } from 'react-router'
 import { GuestOnly, RequireSession } from '@/features/auth/components/route-guards'
 import { AuthLayout } from '@/layouts/AuthLayout'
 import { FullPageLoader, NotFoundPage, RouteError } from './system-pages'
@@ -9,21 +9,16 @@ const lazyPage =
   <M,>(load: () => Promise<M>, pick: (module: M) => ComponentType) =>
   async () => ({ Component: pick(await load()) })
 
-
 export const router = createBrowserRouter([
   {
     path: '/',
     HydrateFallback: FullPageLoader,
     errorElement: <RouteError />,
     children: [
-      // Landing pública; la PWA instalada abre directo en /app (start_url del manifest)
-      { index: true, lazy: lazyPage(() => import('@/features/landing/LandingPage'), (m) => m.LandingPage) },
-
-      // Landing del proyecto ShelfSight (Meta Global AI Developer Hackathon); carga sus propias fuentes
-      {
-        path: 'shelfsight',
-        lazy: lazyPage(() => import('@/features/shelfsight/ShelfSightPage'), (m) => m.ShelfSightPage),
-      },
+      // Landing pública de ShelfSight (carga sus propias fuentes); la PWA instalada abre directo en /app (start_url del manifest)
+      { index: true, lazy: lazyPage(() => import('@/features/shelfsight/ShelfSightPage'), (m) => m.ShelfSightPage) },
+      // Dirección anterior de la landing (enlaces ya compartidos)
+      { path: 'shelfsight', element: <Navigate to="/" replace /> },
 
       // ── Portal del cliente (PWA, mobile-first) ─────────────────────────────
       {
