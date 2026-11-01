@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Smart Abarrotes API
-  version: 1.0.0
+  version: 1.0.2
   description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
 servers:
   - url: http://localhost:3000/api/v1
@@ -73,6 +73,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuthResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /auth/admin/login:
     post:
       operationId: loginAdmin
@@ -92,6 +93,7 @@ paths:
               schema: { $ref: '#/components/schemas/AuthResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /auth/me:
     get:
       operationId: getCurrentUser
@@ -120,6 +122,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/EntryPass' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /me/purchases:
     get:
       operationId: listMyPurchases
@@ -138,6 +141,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PurchaseHistory' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /me/purchases/{saleId}:
     get:
       operationId: getMyPurchase
@@ -153,6 +158,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SaleDetail' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------- STORE DEVICES ----------------
   /store/entry:
@@ -174,6 +181,7 @@ paths:
               schema: { $ref: '#/components/schemas/StoreEntryResponse' }
         '401': { description: Token inválido/expirado o device key inválida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: Token ya utilizado (ENTRY_TOKEN_REUSED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /webhooks/checkout:
     post:
       operationId: handleCheckoutWebhook
@@ -213,6 +221,8 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Category' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createCategory
       summary: Crea categoría
@@ -230,19 +240,22 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Category' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /categories/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
     patch:
       operationId: updateCategory
-      summary: Edita categoría
+      summary: Edita categoría (parcial)
       tags: [Categories]
       security: [{ bearerAuth: [OWNER] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CategoryInput' }
+            schema: { $ref: '#/components/schemas/CategoryUpdate' }
       responses:
         '200':
           description: OK
@@ -250,6 +263,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Category' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
     delete:
       operationId: deleteCategory
       tags: [Categories]
@@ -257,7 +274,10 @@ paths:
       security: [{ bearerAuth: [OWNER] }]
       responses:
         '204': { description: Eliminada }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------- PRODUCTS ----------------
   /products:
@@ -286,9 +306,13 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/Product' } }
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createProduct
       summary: Crea producto
+      description: 'Errores 400 de negocio: CATEGORY_NOT_FOUND. Errores 409: PRODUCT_ALREADY_EXISTS (incluye SKU de productos dados de baja), BARCODE_ALREADY_EXISTS.'
       tags: [Products]
       security: [{ bearerAuth: [OWNER] }]
       requestBody:
@@ -304,6 +328,8 @@ paths:
               schema: { $ref: '#/components/schemas/Product' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /products/lookup:
     get:
       operationId: lookupProduct
@@ -319,6 +345,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /products/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string }, description: SKU }
@@ -334,6 +363,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     patch:
       operationId: updateProduct
       tags: [Products]
@@ -352,6 +383,9 @@ paths:
               schema: { $ref: '#/components/schemas/Product' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       operationId: deleteProduct
       tags: [Products]
@@ -360,6 +394,8 @@ paths:
       responses:
         '204': { description: Eliminado }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /products/{id}/stock-adjustments:
     post:
       operationId: createStockAdjustment
@@ -380,6 +416,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/InventoryMovement' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'INSUFFICIENT_STOCK: un ADJUSTMENT no puede dejar el stock en negativo', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ---------------- INVENTORY ----------------
   /inventory/summary:
@@ -394,6 +434,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/InventorySummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /inventory/movements:
     get:
       operationId: listInventoryMovements
@@ -418,6 +460,9 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/InventoryMovement' } }
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------- SALES ----------------
   /sales:
@@ -446,10 +491,17 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/SaleSummary' } }
                   meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
       operationId: createManualSale
       tags: [Sales]
       summary: Venta MANUAL desde el POS (precios e impuestos recalculados en servidor)
+      description: |
+        Las partidas repetidas del mismo producto se suman. Precio, costo y tasa se toman del producto (bloqueado durante la venta) y se copian a cada partida.
+        Errores: 400 `CASH_RECEIVED_REQUIRED`, `CUSTOMER_NOT_FOUND` · 404 `PRODUCT_NOT_FOUND` · 409 `INSUFFICIENT_STOCK` (details: productId, requested, available), `PRODUCT_INACTIVE` · 422 `CASH_INSUFFICIENT`.
+        Con tarjeta o transferencia `cashReceived` se ignora. Repetir la misma `Idempotency-Key` devuelve la venta original.
       security: [{ bearerAuth: [OWNER] }]
       parameters:
         - { name: Idempotency-Key, in: header, required: false, schema: { type: string, format: uuid }, description: Evita doble cobro por doble clic }
@@ -468,6 +520,8 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: INSUFFICIENT_STOCK o PRODUCT_INACTIVE, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'CASH_INSUFFICIENT (cashReceived < total)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /sales/{id}:
     get:
       operationId: getSale
@@ -483,6 +537,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SaleDetail' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /sales/{id}/receipt:
     get:
       operationId: getSaleReceipt
@@ -498,6 +554,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Receipt' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /sales/{id}/cancel:
     post:
       operationId: cancelSale
@@ -519,6 +577,9 @@ paths:
               schema: { $ref: '#/components/schemas/SaleDetail' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: SALE_ALREADY_CANCELLED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------- REPORTS ----------------
   /reports/summary:
@@ -536,6 +597,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReportSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /reports/sales-trend:
     get:
       operationId: getSalesTrend
@@ -552,6 +616,9 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/TrendPoint' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /reports/top-products:
     get:
       operationId: getTopProducts
@@ -569,6 +636,9 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/TopProduct' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---------------- SETTINGS ----------------
   /settings:
@@ -583,6 +653,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StoreSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     patch:
       operationId: updateSettings
       summary: Actualiza configuración general
@@ -599,6 +671,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StoreSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
 components:
   securitySchemes:
@@ -632,7 +707,7 @@ components:
     Conflict: { description: Conflicto (duplicado / estado inválido), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   schemas:
-    Money: { type: number, multipleOf: 0.01, minimum: 0 }
+    Money: { type: number, minimum: 0, description: 'MXN. El servidor redondea a 2 decimales (half away from zero).' }
     TaxRate: { type: number, minimum: 0, maximum: 1, examples: [0, 0.16] }
     Error:
       type: object
@@ -744,6 +819,15 @@ components:
         color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
         icon: { type: [string, 'null'] }
         sortOrder: { type: integer }
+    CategoryUpdate:
+      type: object
+      minProperties: 1
+      description: Cualquier subconjunto de CategoryInput. Los campos omitidos conservan su valor.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 60 }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        icon: { type: [string, 'null'] }
+        sortOrder: { type: integer }
     CategoryInput:
       type: object
       required: [name, color]
@@ -756,13 +840,13 @@ components:
     ProductStatus: { type: string, enum: [ACTIVE, INACTIVE, DISCONTINUED] }
     Product:
       type: object
-      required: [id, name, price, purchaseCost, taxRate, stock, minStockAlert, status, isLowStock, isQuickAccess]
+      required: [id, name, category, price, purchaseCost, taxRate, stock, minStockAlert, status, isLowStock, isQuickAccess, createdAt, updatedAt]
       properties:
         id: { type: string, description: SKU }
         barcode: { type: [string, 'null'] }
         name: { type: string }
         description: { type: [string, 'null'] }
-        category: { oneOf: [{ $ref: '#/components/schemas/Category' }, { type: 'null' }] }
+        category: { $ref: '#/components/schemas/Category' }
         price: { $ref: '#/components/schemas/Money' }
         purchaseCost: { $ref: '#/components/schemas/Money' }
         taxRate: { $ref: '#/components/schemas/TaxRate' }
@@ -794,7 +878,7 @@ components:
     ProductUpdate:
       type: object
       minProperties: 1
-      description: Todos los campos de ProductCreate excepto id e initialStock, opcionales.
+      description: Todos los campos de ProductCreate excepto id e initialStock, opcionales. Los campos omitidos conservan su valor (no se aplican defaults).
       properties:
         barcode: { type: [string, 'null'] }
         name: { type: string }
@@ -877,7 +961,7 @@ components:
         paymentStatus: { $ref: '#/components/schemas/PaymentStatus' }
         status: { $ref: '#/components/schemas/SaleStatus' }
         totalAmount: { $ref: '#/components/schemas/Money' }
-        itemCount: { type: integer }
+        itemCount: { type: integer, description: Piezas totales del ticket }
         customer:
           oneOf:
             - { type: 'null' }

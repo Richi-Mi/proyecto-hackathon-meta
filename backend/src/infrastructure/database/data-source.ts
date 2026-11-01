@@ -14,5 +14,6 @@ export const AppDataSource = new DataSource({
   uuidExtension: 'pgcrypto',
   // El esquema solo cambia mediante migraciones versionadas
   synchronize: false,
-  logging: env.DB_LOGGING ? ['query', 'error', 'warn'] : ['error', 'warn'],
+  // En pruebas los 409 esperados (violaciones de UNIQUE) llenarían la salida de "query failed"
+  logging: env.DB_LOGGING ? ['query', 'error', 'warn'] : env.NODE_ENV === 'test' ? false : ['error', 'warn'],
 })
