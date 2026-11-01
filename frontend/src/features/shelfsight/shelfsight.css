@@ -1,0 +1,260 @@
+/*
+ * Landing de ShelfSight (/shelfsight).
+ * Todo vive bajo `.sf` para no tocar el tema global de la app (shadcn).
+ * La página se lee como un anaquel visto por la cámara: las etiquetas de precio abren cada sección
+ * y los recuadros de detección de SAM 3.1 son el único elemento llamativo.
+ */
+.sf {
+  --sf-bg: #f1f3f6;
+  --sf-surface: #ffffff;
+  --sf-surface-2: #e5e9f0;
+  --sf-ink: #121b2e;
+  --sf-muted: #4b566b;
+  --sf-line: #ccd3de;
+  --sf-accent: #f5b700;
+  --sf-accent-ink: #121b2e;
+  --sf-accent-soft: #fcefc2;
+  --sf-exit: #c2410c;
+  --sf-exit-ink: #ffffff;
+  --sf-entry: #0f7b5f;
+  --sf-hero-bg: #121b2e;
+  --sf-hero-ink: #f1f3f6;
+  --sf-hero-muted: #a9b4c7;
+  --sf-hero-line: #33415f;
+  --sf-shelf-back: #1b2742;
+  --sf-board: #3a4a6c;
+  --sf-upright: #24314f;
+  --sf-floor: #0e1525;
+  --sf-p1: #c8553d;
+  --sf-p2: #3d8fb5;
+  --sf-p3: #5e9e7e;
+  --sf-p4: #8c6a9e;
+  --sf-cap: #e9edf3;
+  --sf-metal: #c9d1dd;
+  --sf-crimp: #2a3550;
+  --sf-prod-label: #f3f5f8;
+  --sf-bar: #dde3ec;
+  --sf-bar-edge: #bcc6d4;
+  --sf-shadow: rgb(10 16 30 / 0.18);
+  --sf-tag-hole: var(--sf-bg);
+  --sf-font-display: 'Archivo Variable', 'Arial Narrow', system-ui, sans-serif;
+  --sf-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  background: var(--sf-bg);
+  color: var(--sf-ink);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+/* Modo oscuro: sigue la misma clase `.dark` que usa el resto de la app */
+.dark .sf {
+  --sf-bg: #0c1322;
+  --sf-surface: #141d30;
+  --sf-surface-2: #1b2640;
+  --sf-ink: #e7ecf4;
+  --sf-muted: #a3aec2;
+  --sf-line: #2a3652;
+  --sf-accent-soft: #3a3115;
+  --sf-exit: #ff8a5b;
+  --sf-exit-ink: #1a0d05;
+  --sf-entry: #43cfa0;
+  --sf-hero-bg: #080d18;
+  --sf-hero-ink: #eef2f8;
+  --sf-hero-muted: #9aa6bb;
+  --sf-hero-line: #2a3652;
+  --sf-shelf-back: #131c31;
+  --sf-board: #2f3d5c;
+  --sf-upright: #1c2742;
+  --sf-floor: #060a13;
+  --sf-cap: #d9dfe8;
+  --sf-metal: #aeb8c7;
+  --sf-crimp: #222c44;
+  --sf-prod-label: #e3e8ef;
+  --sf-bar: #22304d;
+  --sf-bar-edge: #33456b;
+  --sf-shadow: rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+.sf-gutter {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 768px) {
+  .sf-gutter {
+    padding-left: max(32px, env(safe-area-inset-left, 0px));
+    padding-right: max(32px, env(safe-area-inset-right, 0px));
+  }
+}
+
+/* Escala tipográfica */
+.sf-wide {
+  font-family: var(--sf-font-display);
+  font-stretch: 118%;
+  font-weight: 800;
+  letter-spacing: -0.012em;
+  line-height: 1.05;
+}
+.sf-h1 {
+  font-size: clamp(2.35rem, 5.4vw, 4.1rem);
+  text-wrap: balance;
+}
+.sf-h2 {
+  font-size: clamp(1.75rem, 3.3vw, 2.6rem);
+  text-wrap: balance;
+}
+.sf-h3 {
+  font-family: var(--sf-font-display);
+  font-stretch: 108%;
+  font-weight: 700;
+  font-size: 1.2rem;
+  line-height: 1.25;
+}
+.sf-lead {
+  font-size: 1.125rem;
+  max-width: 62ch;
+}
+.sf-label {
+  font-family: var(--sf-font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sf-mono {
+  font-family: var(--sf-font-mono);
+}
+.sf-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Etiqueta de precio que abre cada sección, como las del borde de un anaquel */
+.sf-tag {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--sf-font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sf-accent-ink);
+  background: var(--sf-accent);
+  padding: 0.3rem 0.75rem 0.3rem 1.25rem;
+  clip-path: polygon(0.6rem 0, 100% 0, 100% 100%, 0.6rem 100%, 0 50%);
+}
+.sf-tag::before {
+  content: '';
+  position: absolute;
+  left: 0.6rem;
+  top: 50%;
+  width: 0.32rem;
+  height: 0.32rem;
+  margin-top: -0.16rem;
+  border-radius: 50%;
+  background: var(--sf-tag-hole);
+}
+
+.sf-lift {
+  box-shadow: 0 14px 36px var(--sf-shadow);
+}
+
+/* Cronograma de 10 días */
+.sf-bar {
+  background: var(--sf-bar);
+  border: 1px solid var(--sf-bar-edge);
+  border-radius: 4px;
+}
+.sf-bar-final {
+  background: var(--sf-accent);
+  border: 1px solid var(--sf-accent);
+  border-radius: 4px;
+}
+.sf-milestone {
+  position: absolute;
+  top: -9px;
+  bottom: -9px;
+  left: 60%;
+  border-left: 2px dashed var(--sf-accent);
+}
+
+/* Ilustraciones del anaquel */
+.sf-s-back { fill: var(--sf-shelf-back); }
+.sf-s-board { fill: var(--sf-board); }
+.sf-s-upright { fill: var(--sf-upright); }
+.sf-s-floor { fill: var(--sf-floor); }
+.sf-det { fill: var(--sf-accent); fill-opacity: 0.12; stroke: var(--sf-accent); stroke-width: 2; }
+.sf-mask { fill: var(--sf-accent); fill-opacity: 0.2; stroke: var(--sf-accent); stroke-width: 1.5; }
+.sf-det-chip { fill: var(--sf-accent); }
+.sf-det-text { fill: var(--sf-accent-ink); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; }
+.sf-ghost { fill: none; stroke: var(--sf-exit); stroke-width: 2; stroke-dasharray: 6 5; }
+.sf-ghost-chip { fill: var(--sf-exit); }
+.sf-ghost-text { fill: var(--sf-exit-ink); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 600; }
+.sf-cam-text { fill: var(--sf-hero-muted); font-family: var(--sf-font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em; }
+.sf-cam-rec { fill: var(--sf-exit); }
+.sf-finder { fill: none; stroke: var(--sf-hero-muted); stroke-width: 2; }
+
+.sf-scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6%;
+  height: 2px;
+  background: var(--sf-accent);
+  box-shadow: 0 0 14px var(--sf-accent);
+  opacity: 0.75;
+  pointer-events: none;
+  animation: sf-sweep 5s ease-in-out infinite alternate;
+}
+@keyframes sf-sweep {
+  from { top: 6%; }
+  to { top: 84%; }
+}
+/* Punto de grabación de la cámara y cursor de la respuesta de Muse Spark */
+.sf-rec-blink {
+  animation: sf-blink 1.6s steps(2, jump-none) infinite;
+}
+.sf-caret {
+  display: inline-block;
+  width: 0;
+  height: 1.1em;
+  margin-right: -2px;
+  vertical-align: text-bottom;
+  border-left: 2px solid var(--sf-accent);
+  animation: sf-blink 0.9s steps(2, jump-none) infinite;
+}
+@keyframes sf-blink {
+  from { opacity: 1; }
+  to { opacity: 0.15; }
+}
+
+/* Indicador de "procesando" del estado del evento */
+.sf-pulse {
+  position: relative;
+}
+.sf-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 2px solid var(--sf-accent);
+  animation: sf-ping 1.2s ease-out infinite;
+}
+@keyframes sf-ping {
+  from { opacity: 0.8; transform: scale(0.6); }
+  to { opacity: 0; transform: scale(1.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-scan { display: none; }
+  .sf-rec-blink,
+  .sf-caret,
+  .sf-pulse::after { animation: none; }
+}
+
+.sf a:focus-visible,
+.sf button:focus-visible {
+  outline: 3px solid var(--sf-accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}

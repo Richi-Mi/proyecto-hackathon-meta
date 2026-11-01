@@ -19,6 +19,12 @@ export const router = createBrowserRouter([
       // Landing pública; la PWA instalada abre directo en /app (start_url del manifest)
       { index: true, lazy: lazyPage(() => import('@/features/landing/LandingPage'), (m) => m.LandingPage) },
 
+      // Landing del proyecto ShelfSight (Meta Global AI Developer Hackathon); carga sus propias fuentes
+      {
+        path: 'shelfsight',
+        lazy: lazyPage(() => import('@/features/shelfsight/ShelfSightPage'), (m) => m.ShelfSightPage),
+      },
+
       // ── Portal del cliente (PWA, mobile-first) ─────────────────────────────
       {
         path: 'app',
