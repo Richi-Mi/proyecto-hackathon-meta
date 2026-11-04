@@ -19,6 +19,7 @@ import { categoryRoutes } from './routes/category.routes'
 import { customerRoutes } from './routes/customer.routes'
 import { devRoutes } from './routes/dev.routes'
 import { healthRoutes } from './routes/health.routes'
+import { storeGateRoutes } from './routes/store-gate.routes'
 import { inventoryRoutes } from './routes/inventory.routes'
 import { productRoutes } from './routes/product.routes'
 import { reportRoutes } from './routes/report.routes'
@@ -68,6 +69,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
     .use(reportRoutes(auth, useCases.reports))
     .use(settingsRoutes(auth, useCases.settings))
     .use(storeRoutes(useCases.store))
+    .use(storeGateRoutes(auth, useCases.store))
     .use(shelfRoutes(auth, useCases.shelf))
     .use(config.devTools ? devRoutes(auth, useCases.store) : new Elysia({ name: 'dev-tools-disabled' }))
 
@@ -82,7 +84,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
         documentation: {
           info: {
             title: 'Smart Abarrotes API',
-            version: '1.0.9',
+            version: '1.0.10',
             description:
               'Endpoints implementados. El contrato completo (fuente de verdad SDD) está en docs/specs/openapi.yaml.',
           },
@@ -97,6 +99,10 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
             { name: 'Reports' },
             { name: 'Settings' },
             { name: 'Store Devices', description: 'Escáner de entrada y sistema de cámaras' },
+            {
+              name: 'Store Gate',
+              description: 'Puerta operada por el propietario desde su teléfono: escanea el QR del cliente y registra su salida',
+            },
             { name: 'Shelf', description: 'ShelfSight: cámara de repisa, eventos antes/después y cola de revisión' },
             {
               name: 'Dev',

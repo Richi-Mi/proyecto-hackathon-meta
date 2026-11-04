@@ -1,15 +1,24 @@
 # Changelog del contrato (`openapi.yaml`)
 
-## 1.0.9 — 2026-11-04
+## 1.0.10 — 2026-11-04
 
 ShelfSight + Smart Store: la cámara de repisa alimenta el carrito del cliente que está dentro. Sin cambios incompatibles.
 
 - **`POST /shelf-events`**: si hay una visita ACTIVE (se toma la más reciente: un cliente a la vez frente a la repisa), lo que sale de la repisa va al **carrito de la visita** (evento `APPLIED` con `visitId`, sin movimiento de inventario) y lo que regresa se descuenta del carrito; si regresan más piezas de las que llevaba → `PENDING_REVIEW` con `NOT_IN_CART`. Sin visita, sigue siendo movimiento de inventario. `ShelfEvent.visitId` nuevo.
 - **`GET /me/visit`** y **`POST /me/visit/checkout`** (CUSTOMER): el cliente ve su carrito en vivo y al salir se genera la venta AUTOMATED y se cobra (mismo flujo que el webhook; idempotente con `eventId = cart-<visitId>`).
 - **`GET /shelf/visit`** y **`POST /shelf/visit/checkout`** (OWNER): el dueño ve al cliente dentro y puede cobrar su salida.
-- **`POST /store/door-entry`** (OWNER): puerta con la cámara del panel; igual que `/store/entry` sin `X-Device-Key`.
 - **`POST /products/identify`** (OWNER): la caja reconoce un producto con una foto. 422 `VISION_UNAVAILABLE` / `VISION_ERROR`.
 - ERD: `shelf_events.visit_id`.
+- Convive con la puerta de la 1.0.9 (`/store-visits`): cualquier visita abierta por ahí también recibe el carrito de la cámara.
+
+## 1.0.9 — 2026-11-04
+
+Puerta de entrada operada por el propietario desde su teléfono (tag **Store Gate**, solo OWNER). Sustituye al escáner físico y a las cámaras de salida mientras no existan; sin cambios incompatibles.
+
+- **`POST /store-visits`**: el teléfono del propietario lee el QR del cliente (`GET /me/entry-pass`) y abre la visita. Mismo caso de uso que `POST /store/entry`, autenticado con la sesión del propietario en lugar de `X-Device-Key`. Un QR inválido responde **422** `INVALID_ENTRY_TOKEN` (no 401, que el frontend interpreta como sesión vencida).
+- **`GET /store-visits`**: clientes dentro de la tienda (`status` por defecto `ACTIVE`, `limit` ≤ 100).
+- **`POST /store-visits/{id}/checkout`**: el propietario registra lo que se llevó el cliente. Mismo caso de uso que `POST /webhooks/checkout` (venta AUTOMATED, cobro `CARD_ON_FILE`, descuento de stock); `items` vacío cierra la visita sin venta.
+- Esquemas nuevos: `StoreVisit`, `VisitStatus`, `GateEntryRequest`, `GateCheckoutRequest`. Sin cambios en el ERD.
 
 ## 1.0.8 — 2026-11-04
 

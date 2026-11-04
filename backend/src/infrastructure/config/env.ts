@@ -71,9 +71,14 @@ function loadEnv(): Env {
   } catch {
     throw new Error(`STORE_TIMEZONE inválida: "${value.STORE_TIMEZONE}" (usa una zona IANA, p. ej. America/Mexico_City)`)
   }
+  // Se reporta cuántas llaves se leyeron y cuáles son cortas, nunca su contenido
   const deviceKeys = parseList(value.STORE_DEVICE_KEYS)
-  if (deviceKeys.length === 0 || deviceKeys.some((key) => key.length < 16)) {
-    throw new Error('STORE_DEVICE_KEYS: cada llave debe tener al menos 16 caracteres')
+  const shortKeys = deviceKeys.flatMap((key, i) => (key.length < 16 ? [`la #${i + 1} tiene ${key.length}`] : []))
+  if (deviceKeys.length === 0 || shortKeys.length > 0) {
+    throw new Error(
+      `STORE_DEVICE_KEYS: se leyeron ${deviceKeys.length} llave(s) separadas por coma; ${shortKeys.join(', ') || 'ninguna es válida'} ` +
+        '(cada llave necesita al menos 16 caracteres; usa una sola sin comas, p. ej. `openssl rand -hex 24`)',
+    )
   }
   return value
 }

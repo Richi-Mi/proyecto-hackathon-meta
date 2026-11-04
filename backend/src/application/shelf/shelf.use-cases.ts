@@ -278,11 +278,6 @@ export class ShelfUseCases {
     return this.checkoutVisit(visit)
   }
 
-  /** Puerta: el dueño (laptop/teléfono en la entrada) lee el QR del cliente y abre su visita. */
-  doorEntry(input: { token: string; gateId: string }) {
-    return this.store.registerEntry(input)
-  }
-
   // ── Caja: identificar un producto con una foto ──────────────────────────────
 
   async identifyProduct(image: ShelfImage): Promise<ProductIdentificationResult> {

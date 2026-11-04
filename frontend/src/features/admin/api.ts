@@ -1,6 +1,8 @@
 import { adminApi } from '@/lib/api/client'
 import type {
   Category,
+  CheckoutResult,
+  GateCheckoutRequest,
   CategoryInput,
   InventoryMovement,
   InventorySummary,
@@ -22,11 +24,13 @@ import type {
   SimulatedVisit,
   CurrentVisit,
   ProductIdentification,
-  StoreEntryResponse,
   VisitCheckout,
   StockAdjustmentRequest,
+  StoreEntryResponse,
   StoreSettings,
   StoreSettingsUpdate,
+  StoreVisit,
+  VisitStatus,
   TopProduct,
   TrendPoint,
 } from '@/lib/api/types'
@@ -154,10 +158,19 @@ export const fetchCurrentVisit = async (signal?: AbortSignal) => (await adminApi
 
 export const checkoutCurrentVisit = async () => (await adminApi.post<VisitCheckout>('/shelf/visit/checkout', undefined, { timeout: 30_000 })).data
 
-/** Puerta: el QR leído con la cámara abre la visita del cliente */
-export const registerDoorEntry = async (token: string, gateId: string) =>
-  (await adminApi.post<StoreEntryResponse>('/store/door-entry', { token, gateId })).data
-
 /** Caja: reconoce un producto con una foto */
 export const identifyProduct = async (image: string) =>
   (await adminApi.post<ProductIdentification>('/products/identify', { image }, { timeout: 90_000 })).data
+
+// ── Puerta operada desde el teléfono del propietario ─────────────────────────
+
+/** Contenido del QR del cliente → abre su visita. QR inválido o expirado = 422 `INVALID_ENTRY_TOKEN`. */
+export const admitAtGate = async (token: string, gateId?: string) =>
+  (await adminApi.post<StoreEntryResponse>('/store-visits', { token, ...(gateId && { gateId }) })).data
+
+export const fetchStoreVisits = async (query: { status?: VisitStatus; limit?: number }, signal?: AbortSignal) =>
+  (await adminApi.get<StoreVisit[]>('/store-visits', { params: query, signal })).data
+
+/** `items` vacío = el cliente salió sin comprar */
+export const checkoutAtGate = async (visitId: string, items: GateCheckoutRequest['items']) =>
+  (await adminApi.post<CheckoutResult>(`/store-visits/${visitId}/checkout`, { items })).data

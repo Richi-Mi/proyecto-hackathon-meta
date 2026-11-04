@@ -1075,6 +1075,107 @@ describe('flujo automático (Smart Store)', () => {
   })
 })
 
+describe('puerta del propietario (/store-visits)', () => {
+  let guestToken = ''
+  let guestId = ''
+
+  const pass = async () => (await call('GET', '/api/v1/me/entry-pass', { token: guestToken })).body.token as string
+  const admit = (token: string, as = ownerToken, gateId?: string) =>
+    call('POST', '/api/v1/store-visits', { token: as, body: { token, ...(gateId && { gateId }) } })
+  const stockOf = async (id: string) => (await call('GET', `/api/v1/products/${id}`, { token: ownerToken })).body.stock
+  const visitStatus = async (id: string) =>
+    ((await AppDataSource.query(`SELECT status FROM store_visits WHERE id = $1`, [id])) as { status: string }[])[0]?.status
+
+  beforeAll(async () => {
+    const categoryId = (
+      await call('POST', '/api/v1/categories', { token: ownerToken, body: { name: 'Puerta', color: '#22C55E' } })
+    ).body.id
+    await call('POST', '/api/v1/products', {
+      token: ownerToken,
+      body: { id: 'GATE-A', name: 'Producto puerta', categoryId, price: 50, purchaseCost: 30, taxRate: 0, barcode: '2009999000028', initialStock: 10 },
+    })
+    const registered = await call('POST', '/api/v1/auth/register', {
+      body: { name: 'Carla Puerta', email: 'carla@puerta.mx', password: 'secreta-123' },
+    })
+    guestToken = registered.body.accessToken
+    guestId = registered.body.user.id
+  })
+
+  test('el QR del cliente abre la visita y aparece en la lista de activas', async () => {
+    const res = await admit(await pass(), ownerToken, 'PUERTA-PRUEBA')
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({ user: { id: guestId, name: 'Carla Puerta' } })
+
+    const list = await call('GET', '/api/v1/store-visits', { token: ownerToken })
+    expect(list.status).toBe(200)
+    expect(list.body.find((visit: Json) => visit.id === res.body.visitId)).toMatchObject({
+      customer: { id: guestId, name: 'Carla Puerta' },
+      gateId: 'PUERTA-PRUEBA',
+      status: 'ACTIVE',
+      exitedAt: null,
+    })
+  })
+
+  test('puerta por defecto, QR inválido → 422 (no 401), reusado → 409, cliente → 403', async () => {
+    const token = await pass()
+    const first = await admit(token)
+    expect(first.status).toBe(201)
+    const [row] = await AppDataSource.query(`SELECT gate_id FROM store_visits WHERE id = $1`, [first.body.visitId])
+    expect(row.gate_id).toBe('PUERTA-TELEFONO')
+
+    const reused = await admit(token)
+    expect([reused.status, reused.body.error.code]).toEqual([409, 'ENTRY_TOKEN_REUSED'])
+
+    const invalid = await admit('basura')
+    expect([invalid.status, invalid.body.error.code]).toEqual([422, 'INVALID_ENTRY_TOKEN'])
+
+    expect((await admit(await pass(), guestToken)).status).toBe(403)
+    expect((await call('GET', '/api/v1/store-visits', { token: guestToken })).status).toBe(403)
+    expect((await call('GET', '/api/v1/store-visits?status=OTRO', { token: ownerToken })).status).toBe(400)
+  })
+
+  test('salida con productos → venta AUTOMATED, cobro y descuento de stock; segunda salida → 409', async () => {
+    const visitId = (await admit(await pass())).body.visitId as string
+    const stockBefore = await stockOf('GATE-A')
+
+    const res = await call('POST', `/api/v1/store-visits/${visitId}/checkout`, {
+      token: ownerToken,
+      body: { items: [{ productId: 'GATE-A', quantity: 2 }, { barcode: '2009999000028', quantity: 1 }] },
+    })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ visitId, totalAmount: 150, paymentStatus: 'PAID' })
+    expect(await stockOf('GATE-A')).toBe(stockBefore - 3)
+    expect(await visitStatus(visitId)).toBe('COMPLETED')
+
+    const sale = await call('GET', `/api/v1/sales/${res.body.saleId}`, { token: ownerToken })
+    expect(sale.body).toMatchObject({ saleType: 'AUTOMATED', paymentMethod: 'CARD_ON_FILE' })
+
+    const again = await call('POST', `/api/v1/store-visits/${visitId}/checkout`, { token: ownerToken, body: { items: [] } })
+    expect([again.status, again.body.error.code]).toEqual([409, 'VISIT_CLOSED'])
+
+    const closed = await call('GET', '/api/v1/store-visits?status=COMPLETED', { token: ownerToken })
+    expect(closed.body.find((visit: Json) => visit.id === visitId)?.exitedAt).toBeString()
+  })
+
+  test('salida sin compra cierra la visita; visita o producto desconocido → 404', async () => {
+    const visitId = (await admit(await pass())).body.visitId as string
+    const unknownProduct = await call('POST', `/api/v1/store-visits/${visitId}/checkout`, {
+      token: ownerToken,
+      body: { items: [{ productId: 'NO-EXISTE', quantity: 1 }] },
+    })
+    expect([unknownProduct.status, unknownProduct.body.error.code]).toEqual([404, 'PRODUCT_NOT_FOUND'])
+    expect(await visitStatus(visitId)).toBe('ACTIVE')
+
+    const empty = await call('POST', `/api/v1/store-visits/${visitId}/checkout`, { token: ownerToken, body: { items: [] } })
+    expect(empty.status).toBe(200)
+    expect(empty.body).toMatchObject({ visitId, saleId: null, folio: null, totalAmount: 0, paymentStatus: null })
+    expect(await visitStatus(visitId)).toBe('COMPLETED')
+
+    const missing = await call('POST', `/api/v1/store-visits/${crypto.randomUUID()}/checkout`, { token: ownerToken, body: { items: [] } })
+    expect([missing.status, missing.body.error.code]).toEqual([404, 'VISIT_NOT_FOUND'])
+  })
+})
+
 describe('configuración (/settings)', () => {
   const printer = { connection: 'USB', address: '0416:5011', paperWidthMm: 58 }
 
@@ -1317,9 +1418,9 @@ describe('ShelfSight (/shelf-events)', () => {
 
     expect((await call('GET', '/api/v1/me/visit', { token: customerToken })).body).toEqual({ visit: null })
     const pass = await call('GET', '/api/v1/me/entry-pass', { token: customerToken })
-    const door = await call('POST', '/api/v1/store/door-entry', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
+    const door = await call('POST', '/api/v1/store-visits', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
     expect(door.status).toBe(201)
-    const reused = await call('POST', '/api/v1/store/door-entry', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
+    const reused = await call('POST', '/api/v1/store-visits', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
     expect([reused.status, reused.body.error.code]).toEqual([409, 'ENTRY_TOKEN_REUSED'])
 
     sees({ quantity: 2 })
@@ -1356,7 +1457,7 @@ describe('ShelfSight (/shelf-events)', () => {
 
   test('el dueño puede cobrar la salida; un evento revisado se va al carrito si el cliente sigue dentro', async () => {
     const pass = await call('GET', '/api/v1/me/entry-pass', { token: customerToken })
-    await call('POST', '/api/v1/store/door-entry', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
+    await call('POST', '/api/v1/store-visits', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
     sees({ confidence: 0.3 })
     const doubtful = await post()
     expect(doubtful.body.status).toBe('PENDING_REVIEW')

@@ -7,6 +7,17 @@ import { createApp } from './interfaces/http/app'
 
 await AppDataSource.initialize()
 
+// En producción el esquema no depende solo del pre-deploy de Railway: se aplican las migraciones pendientes al arrancar.
+// Es idempotente (sin pendientes no hace nada). El seed sigue corriendo solo en el pre-deploy (`bun run db:prepare`).
+if (env.NODE_ENV === 'production') {
+  const applied = await AppDataSource.runMigrations({ transaction: 'each' })
+  console.log(
+    applied.length
+      ? `🗄️  Migraciones aplicadas al arrancar: ${applied.map((m) => m.name).join(', ')}`
+      : '🗄️  Esquema al día: no había migraciones pendientes',
+  )
+}
+
 const container = createContainer(AppDataSource)
 const app = createApp({
   useCases: container.useCases,

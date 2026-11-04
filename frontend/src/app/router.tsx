@@ -95,6 +95,7 @@ export const router = createBrowserRouter([
                     lazy: lazyPage(() => import('@/features/admin/pages/DashboardPage'), (m) => m.DashboardPage),
                   },
                   { path: 'pos', lazy: lazyPage(() => import('@/features/admin/pages/PosPage'), (m) => m.PosPage) },
+                  { path: 'gate', lazy: lazyPage(() => import('@/features/admin/pages/GatePage'), (m) => m.GatePage) },
                   {
                     path: 'inventory',
                     lazy: lazyPage(() => import('@/features/admin/pages/InventoryPage'), (m) => m.InventoryPage),
@@ -104,7 +105,6 @@ export const router = createBrowserRouter([
                     path: 'shelf',
                     lazy: lazyPage(() => import('@/features/admin/pages/ShelfEventsPage'), (m) => m.ShelfEventsPage),
                   },
-                  { path: 'door', lazy: lazyPage(() => import('@/features/admin/pages/DoorPage'), (m) => m.DoorPage) },
                   { path: 'camera', lazy: lazyPage(() => import('@/features/admin/pages/CameraPage'), (m) => m.CameraPage) },
                   { path: 'settings', lazy: lazyPage(() => import('@/features/admin/pages/SettingsPage'), (m) => m.SettingsPage) },
                 ],

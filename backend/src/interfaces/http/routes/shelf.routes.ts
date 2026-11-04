@@ -6,7 +6,6 @@ import type { ShelfImage } from '../../../domain/models/shelf-event'
 import type { AuthPlugin } from '../plugins/auth.plugin'
 import { presentPage, presentProduct, presentShelfEvent, presentVisitCart } from '../presenters'
 import { errors, paginated } from '../schemas/common.schema'
-import { StoreEntryRequest, StoreEntryResponseSchema } from '../schemas/store.schema'
 import {
   CurrentVisitSchema,
   ProductIdentificationSchema,
@@ -108,22 +107,6 @@ export const shelfRoutes = (auth: AuthPlugin, useCases: ShelfUseCases) =>
           response: { 200: VisitCheckoutSchema, ...errors(401, 403, 404, 409) },
           detail: { summary: 'El dueño cobra la salida del cliente que está en la tienda', operationId: 'checkoutCurrentStoreVisit' },
         })
-        .post(
-          '/store/door-entry',
-          async ({ body, status }) => {
-            const entry = await useCases.doorEntry(body)
-            return status(201, { ...entry, enteredAt: entry.enteredAt.toISOString() })
-          },
-          {
-            body: StoreEntryRequest,
-            response: { 201: StoreEntryResponseSchema, ...errors(400, 401, 403, 409) },
-            detail: {
-              tags: ['Store Devices'],
-              summary: 'Puerta operada por el dueño: lee el QR del cliente con la cámara y abre su visita',
-              operationId: 'registerDoorEntry',
-            },
-          },
-        )
         .post(
           '/products/identify',
           async ({ body }) => {

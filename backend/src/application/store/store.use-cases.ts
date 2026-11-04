@@ -8,14 +8,14 @@ import {
   UnprocessableError,
 } from '../../domain/errors'
 import type { Sale } from '../../domain/models/sale'
-import type { StoreVisit } from '../../domain/models/store-visit'
+import type { StoreVisit, StoreVisitWithCustomer } from '../../domain/models/store-visit'
 import { priceLine, priceSale } from '../../domain/sales/pricing'
 import type { EntryPassSigner } from '../ports/entry-pass-signer'
 import type { PaymentGateway } from '../ports/payment-gateway'
 import type { ProductRepository } from '../ports/product-repository'
 import type { LockedProduct, SaleDraft, SaleRepository } from '../ports/sale-repository'
 import type { DeviceKeyVerifier, WebhookSignatureVerifier } from '../ports/store-device-auth'
-import type { StoreVisitRepository, VisitClosing } from '../ports/store-visit-repository'
+import type { StoreVisitQuery, StoreVisitRepository, VisitClosing } from '../ports/store-visit-repository'
 import type { UserRepository } from '../ports/user-repository'
 
 export interface StoreEntryInput {
@@ -61,6 +61,9 @@ export interface StoreConfig {
   simulationCustomerEmail: string
   entryPassTtlSeconds: number
 }
+
+/** Puerta por defecto cuando el teléfono del propietario no indica una */
+export const DEFAULT_GATE_ID = 'PUERTA-TELEFONO'
 
 /** Tolerancia ante relojes desfasados entre el sistema de cámaras y el servidor */
 const CLOCK_SKEW_MS = 5 * 60 * 1000
@@ -142,6 +145,30 @@ export class StoreUseCases {
     }
 
     return toResult(visit.id, await this.charge(sale, visit.userId))
+  }
+
+  /**
+   * Puerta operada por el propietario: su teléfono lee el QR y abre la visita (mismas reglas que el escáner).
+   * Un QR inválido es un dato inválido (422), no una sesión inválida: un 401 cerraría la sesión del propietario.
+   */
+  async admitAtGate({ token, gateId }: { token: string; gateId?: string }): Promise<StoreEntry> {
+    try {
+      return await this.registerEntry({ token, gateId: gateId?.trim() || DEFAULT_GATE_ID })
+    } catch (error) {
+      if (error instanceof UnauthorizedError && error.code === 'INVALID_ENTRY_TOKEN') {
+        throw new UnprocessableError(error.code, error.message)
+      }
+      throw error
+    }
+  }
+
+  listVisits(query: StoreVisitQuery): Promise<StoreVisitWithCustomer[]> {
+    return this.visits.list(query)
+  }
+
+  /** El propietario registra lo que se llevó el cliente (mismas reglas que el webhook de las cámaras). */
+  checkoutAtGate(visitId: string, items: CheckoutItemInput[]): Promise<CheckoutResult> {
+    return this.checkout({ eventId: `gate-${crypto.randomUUID()}`, visitId, exitedAt: new Date(), items })
   }
 
   /** Visita completa del cliente demo para la presentación (mismos casos de uso que los dispositivos). */

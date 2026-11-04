@@ -24,7 +24,7 @@ Más una base **PostgreSQL** de Railway. No hay CORS ni URLs cruzadas que config
 2. En Railway: **New Project → Deploy from GitHub repo** y elige el repo. No cambies el *Root Directory*: debe ser la raíz.
 3. En el mismo proyecto: **+ New → Database → PostgreSQL**.
 4. Abre el servicio de la app → **Variables → Raw Editor** y pega el bloque de abajo, ya con tus valores.
-5. Servicio de la app → **Settings → Networking → Generate Domain**. Railway detecta el puerto: la app escucha en `PORT`.
+5. Servicio de la app → **Settings → Networking → Generate Domain**. El puerto del dominio debe ser el mismo en el que escucha la app: **3000** (o el valor de `PORT` si lo cambias). Si no coinciden, todas las rutas responden 502 `Application failed to respond` aunque el log diga que el servidor arrancó.
 6. Railway redespliega solo al cambiar variables. Revisa los logs del deploy: el *pre-deploy* debe mostrar las migraciones y el seed (`✔ Propietario creado…`). Después abre `https://<tu-dominio>/`.
 
 Desde ahí, cada `git push` a la rama conectada vuelve a desplegar. Las migraciones nuevas se aplican solas y el seed no duplica nada.
@@ -80,6 +80,9 @@ VISION_MODEL=muse-spark-1.3
 ## Cosas a saber
 
 - **`ENABLE_STORE_SIMULATOR` se lee al compilar** (para mostrar el botón en el frontend) **y al arrancar** (para montar `/dev`). Si la cambias, Railway reconstruye la imagen.
+- **`STORE_DEVICE_KEYS` se separa por comas** y **cada** llave necesita 16 caracteres o más. Una coma de más (`llave-larga,abc`) hace que el servidor no arranque. Lo más seguro es una sola llave de `openssl rand -hex 24`, sin comillas ni espacios.
+- **No copies `backend/.env` tal cual.** Las variables de desarrollo no sirven en Railway: `OTEL_ENABLED=true` manda las trazas a `localhost:4318`, donde no hay colector, y `FRONTEND_DIST` vacía hace que el servidor solo exponga la API. En el log de arranque deben salir las tres líneas: API, Frontend (🛒) y Swagger.
+- **La app aplica las migraciones pendientes al arrancar** (con `NODE_ENV=production`), aunque el pre-deploy no haya corrido; el log lo dice (`🗄️ Migraciones aplicadas…` o `Esquema al día`). El seed **solo** corre en el pre-deploy: si la app funciona pero no existe el propietario ni el catálogo demo, el pre-deploy no se ejecutó. Revisa *Settings → Deploy* del servicio y vuelve a desplegar, o siémbralo desde tu máquina con la URL pública de la base: `cd backend && DATABASE_URL="<DATABASE_PUBLIC_URL>" bun run db:seed` (con las variables `SEED_*` definidas).
 - **El seed nunca sobrescribe.** Cambiar `SEED_OWNER_PASSWORD` después del primer deploy no cambia la contraseña de una cuenta que ya existe.
 - **Si el pre-deploy falla**, el deploy no se publica y la versión anterior sigue activa. Las causas típicas son una variable que falta o es corta (el mensaje dice cuál: `Variables de entorno inválidas: /JWT_SECRET…`) o que `DATABASE_URL` no apunta a la base.
 - **Postgres de Railway:** las migraciones habilitan `pgcrypto`, `citext` y `pg_trgm`, que vienen incluidas en la imagen de Railway.
