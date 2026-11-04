@@ -539,6 +539,108 @@ export interface paths {
         patch: operations["updateSettings"];
         trace?: never;
     };
+    "/shelf/vision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Modelo de visión configurado y reglas de aplicación automática */
+        get: operations["getShelfVisionStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shelf-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bitácora de eventos de repisa (más recientes primero) */
+        get: operations["listShelfEvents"];
+        put?: never;
+        /**
+         * Interacción con la repisa (foto antes/después) → visión → movimiento de inventario o revisión
+         * @description La cámara (un teléfono con la sesión del dueño) envía la foto de antes y la de después de una interacción.
+         *     El servidor pide al modelo de visión qué producto del catálogo cambió y cuántas piezas.
+         *     Se aplica solo si el producto existe, la confianza ≥ `autoApplyConfidence`, la cantidad ≤ `maxAutoQuantity`
+         *     y (en una salida) hay stock suficiente. Salida = movimiento ADJUSTMENT negativo; entrada = RESTOCK.
+         *     Si no, queda en `PENDING_REVIEW` con `reviewReason` y el stock no cambia. Sin modelo configurado, todo va a revisión.
+         */
+        post: operations["createShelfEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shelf-events/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Detalle de un evento con sus fotos */
+        get: operations["getShelfEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shelf-events/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * El dueño confirma o corrige el evento y se aplica al inventario
+         * @description Solo para eventos `PENDING_REVIEW` o `NO_CHANGE`. Los datos enviados reemplazan lo que interpretó la visión.
+         */
+        post: operations["confirmShelfEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shelf-events/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** El dueño descarta el evento (el stock no cambia) */
+        post: operations["rejectShelfEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -983,6 +1085,68 @@ export interface components {
             defaultTaxRate?: components["schemas"]["TaxRate"];
             ticketFooter?: string | null;
             peripherals?: components["schemas"]["Peripherals"];
+        };
+        /** @enum {string} */
+        ShelfEventStatus: "APPLIED" | "PENDING_REVIEW" | "NO_CHANGE" | "REJECTED";
+        /** @enum {string} */
+        ShelfAction: "REMOVED" | "ADDED" | "MOVED" | "NONE";
+        /** @enum {string} */
+        ShelfReviewReason: "VISION_UNAVAILABLE" | "VISION_ERROR" | "UNKNOWN_PRODUCT" | "LOW_CONFIDENCE" | "QUANTITY_TOO_HIGH" | "INSUFFICIENT_STOCK";
+        ShelfEventCreateRequest: {
+            /** @example iphone-repisa-1 */
+            cameraId: string;
+            /** Format: date-time */
+            capturedAt?: string;
+            /** @description Fracción de la imagen que cambió (detector del teléfono) */
+            changeRatio?: number;
+            /** @description JPEG/PNG/WebP como data URL o base64; máx. 3 MB */
+            beforeImage: string;
+            /** @description JPEG/PNG/WebP como data URL o base64; máx. 3 MB */
+            afterImage: string;
+        };
+        ShelfEvent: {
+            /** Format: uuid */
+            id: string;
+            cameraId: string;
+            status: components["schemas"]["ShelfEventStatus"];
+            action: components["schemas"]["ShelfAction"];
+            product: {
+                id: string;
+                name: string | null;
+            } | null;
+            quantity: number;
+            confidence: number | null;
+            reviewReason: components["schemas"]["ShelfReviewReason"] | null;
+            /** @description Explicación del modelo o del error */
+            note: string | null;
+            model: string | null;
+            changeRatio: number | null;
+            /** Format: uuid */
+            movementId: string | null;
+            /** Format: date-time */
+            capturedAt: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            resolvedAt: string | null;
+        };
+        ShelfEventDetail: components["schemas"]["ShelfEvent"] & {
+            /** @description data URL */
+            beforeImage: string;
+            /** @description data URL */
+            afterImage: string;
+        };
+        ShelfEventConfirmRequest: {
+            /** @enum {string} */
+            action: "REMOVED" | "ADDED";
+            productId: string;
+            quantity: number;
+        };
+        ShelfVisionStatus: {
+            visionEnabled: boolean;
+            model: string | null;
+            autoApplyConfidence: number;
+            maxAutoQuantity: number;
         };
     };
     responses: {
@@ -2073,6 +2237,217 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getShelfVisionStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfVisionStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listShelfEvents: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ShelfEventStatus"];
+                page?: components["parameters"]["Page"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ShelfEvent"][];
+                        meta: components["schemas"]["PaginationMeta"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createShelfEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShelfEventCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Evento registrado (aplicado, sin cambio o en revisión) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfEvent"];
+                };
+            };
+            /** @description VALIDATION_ERROR | INVALID_IMAGE | INVALID_CAPTURED_AT */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getShelfEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfEventDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description SHELF_EVENT_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    confirmShelfEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ShelfEventConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Evento aplicado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfEvent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description SHELF_EVENT_NOT_FOUND | PRODUCT_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SHELF_EVENT_RESOLVED | INSUFFICIENT_STOCK */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rejectShelfEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Evento descartado */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShelfEvent"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description SHELF_EVENT_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description SHELF_EVENT_RESOLVED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
 }

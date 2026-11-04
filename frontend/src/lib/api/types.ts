@@ -35,6 +35,14 @@ export type StoreSettings = Schemas['StoreSettings']
 export type StoreSettingsUpdate = Schemas['StoreSettingsUpdate']
 export type Peripherals = Schemas['Peripherals']
 export type PrinterSettings = NonNullable<Peripherals['printer']>
+export type ShelfEvent = Schemas['ShelfEvent']
+export type ShelfEventDetail = Schemas['ShelfEventDetail']
+export type ShelfEventStatus = Schemas['ShelfEventStatus']
+export type ShelfAction = Schemas['ShelfAction']
+export type ShelfReviewReason = Schemas['ShelfReviewReason']
+export type ShelfEventCreateRequest = Schemas['ShelfEventCreateRequest']
+export type ShelfEventConfirmRequest = Schemas['ShelfEventConfirmRequest']
+export type ShelfVisionStatus = Schemas['ShelfVisionStatus']
 
 export interface Paginated<T> {
   data: T[]

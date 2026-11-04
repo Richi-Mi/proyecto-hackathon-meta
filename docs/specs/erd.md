@@ -13,7 +13,31 @@ erDiagram
     PRODUCTS ||--o{ INVENTORY_MOVEMENTS : "registra"
     SALES |o--o{ INVENTORY_MOVEMENTS : "origina"
     USERS |o--o{ INVENTORY_MOVEMENTS : "realiza"
+    PRODUCTS |o--o{ SHELF_EVENTS : "detectado en"
+    SHELF_EVENTS |o--o| INVENTORY_MOVEMENTS : "aplica"
+    USERS |o--o{ SHELF_EVENTS : "revisa"
 
+    SHELF_EVENTS {
+        uuid id PK
+        varchar camera_id
+        enum status "APPLIED | PENDING_REVIEW | NO_CHANGE | REJECTED"
+        enum action "REMOVED | ADDED | MOVED | NONE"
+        varchar product_id FK "nullable"
+        int quantity ">= 0"
+        numeric confidence "nullable, 0-1"
+        varchar review_reason "nullable"
+        text note "nullable, explicación del modelo"
+        varchar model "nullable"
+        numeric change_ratio "nullable"
+        uuid movement_id FK "nullable"
+        varchar image_mime_type
+        bytea before_image
+        bytea after_image
+        timestamptz captured_at
+        timestamptz created_at
+        timestamptz resolved_at "nullable"
+        uuid resolved_by FK "nullable"
+    }
     USERS {
         uuid id PK
         varchar name
@@ -120,5 +144,5 @@ erDiagram
     }
 ```
 
-Índices clave: `sales(date_time)`, `sales(user_id, date_time)`, `sale_items(product_id)`, `products(name)` (trigram para búsqueda), `products(category_id)`, `inventory_movements(product_id, created_at)`, `store_visits(user_id) WHERE status = 'ACTIVE'` (único: como máximo una visita activa por cliente). Checks: `quantity > 0`, `price >= 0`, `purchase_cost >= 0`, `tax_rate BETWEEN 0 AND 1`.
+Índices clave: `sales(date_time)`, `sales(user_id, date_time)`, `sale_items(product_id)`, `products(name)` (trigram para búsqueda), `products(category_id)`, `inventory_movements(product_id, created_at)`, `store_visits(user_id) WHERE status = 'ACTIVE'` (único: como máximo una visita activa por cliente), `shelf_events(status, created_at)`. Checks: `quantity > 0`, `price >= 0`, `purchase_cost >= 0`, `tax_rate BETWEEN 0 AND 1`.
 

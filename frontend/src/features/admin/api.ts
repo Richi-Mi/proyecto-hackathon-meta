@@ -13,6 +13,12 @@ import type {
   ReportSummary,
   SaleDetail,
   SaleSummary,
+  ShelfEvent,
+  ShelfEventConfirmRequest,
+  ShelfEventCreateRequest,
+  ShelfEventDetail,
+  ShelfEventStatus,
+  ShelfVisionStatus,
   SimulatedVisit,
   StockAdjustmentRequest,
   StoreSettings,
@@ -118,3 +124,23 @@ export const fetchSettings = async (signal?: AbortSignal) =>
 /** PATCH parcial; en `peripherals` solo se reemplazan los dispositivos enviados. */
 export const updateSettings = async (changes: StoreSettingsUpdate) =>
   (await adminApi.patch<StoreSettings>('/settings', changes)).data
+
+// ── ShelfSight: cámara de repisa ─────────────────────────────────────────────
+
+export const fetchShelfVisionStatus = async (signal?: AbortSignal) =>
+  (await adminApi.get<ShelfVisionStatus>('/shelf/vision', { signal })).data
+
+/** El modelo de visión puede tardar: más margen que el timeout general */
+export const createShelfEvent = async (event: ShelfEventCreateRequest) =>
+  (await adminApi.post<ShelfEvent>('/shelf-events', event, { timeout: 90_000 })).data
+
+export const fetchShelfEvents = async (query: { status?: ShelfEventStatus; page?: number; limit?: number }, signal?: AbortSignal) =>
+  (await adminApi.get<Paginated<ShelfEvent>>('/shelf-events', { params: query, signal })).data
+
+export const fetchShelfEvent = async (id: string, signal?: AbortSignal) =>
+  (await adminApi.get<ShelfEventDetail>(`/shelf-events/${id}`, { signal })).data
+
+export const confirmShelfEvent = async (id: string, confirmation: ShelfEventConfirmRequest) =>
+  (await adminApi.post<ShelfEvent>(`/shelf-events/${id}/confirm`, confirmation)).data
+
+export const rejectShelfEvent = async (id: string) => (await adminApi.post<ShelfEvent>(`/shelf-events/${id}/reject`)).data

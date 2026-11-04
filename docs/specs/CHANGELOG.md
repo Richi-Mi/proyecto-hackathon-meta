@@ -1,5 +1,14 @@
 # Changelog del contrato (`openapi.yaml`)
 
+## 1.0.8 — 2026-11-04
+
+ShelfSight: cámara de repisa. Rutas nuevas (tag **Shelf**, solo OWNER); sin cambios incompatibles.
+
+- **`POST /shelf-events`**: el teléfono envía la foto de antes y la de después de una interacción. Un modelo de visión (API compatible con OpenAI; por defecto Muse Spark en Meta Model API) dice qué producto cambió y cuántas piezas. Se aplica solo con producto del catálogo, confianza ≥ `SHELF_AUTO_APPLY_CONFIDENCE`, cantidad ≤ `SHELF_MAX_AUTO_QUANTITY` y stock suficiente; si no, `PENDING_REVIEW`. Salida = `ADJUSTMENT` negativo, entrada = `RESTOCK`, con nota `ShelfSight · …` en el kardex.
+- **`GET /shelf-events`**, **`GET /shelf-events/{id}`** (con fotos como data URL), **`POST /shelf-events/{id}/confirm`** y **`/reject`**: bitácora y cola de revisión. Códigos `INVALID_IMAGE`, `SHELF_EVENT_NOT_FOUND`, `SHELF_EVENT_RESOLVED`.
+- **`GET /shelf/vision`**: si hay modelo configurado y las reglas de aplicación automática.
+- ERD: tabla `shelf_events` (fotos en `bytea`).
+
 ## 1.0.7 — 2026-11-01
 
 Despliegue en producción (Railway). Solo documentación; sin cambios en rutas ni esquemas.

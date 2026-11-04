@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import type { RefundRequest } from '../src/application/ports/payment-gateway'
+import type { ShelfAnalysis, ShelfVisionAnalyzer } from '../src/application/ports/shelf-vision'
+import { ShelfAction } from '../src/domain/enums'
 import { createContainer } from '../src/container'
 import { env, parseList } from '../src/infrastructure/config/env'
 import { AppDataSource } from '../src/infrastructure/database/data-source'
@@ -23,8 +25,21 @@ class SpyPaymentGateway extends MockPaymentGateway {
   }
 }
 
+/** Visión de prueba: devuelve lo que la prueba le indique (o lanza un error) */
+class FakeShelfVision implements ShelfVisionAnalyzer {
+  readonly enabled = true
+  readonly model = 'fake-vision'
+  next: ShelfAnalysis | Error = { action: ShelfAction.NONE, productId: null, quantity: 0, confidence: 1, reason: '' }
+
+  async analyze() {
+    if (this.next instanceof Error) throw this.next
+    return this.next
+  }
+}
+
 const gateway = new SpyPaymentGateway()
-const container = createContainer(AppDataSource, { paymentGateway: gateway })
+const shelfVision = new FakeShelfVision()
+const container = createContainer(AppDataSource, { paymentGateway: gateway, shelfVision })
 const app = createApp({
   useCases: container.useCases,
   checkDatabase: container.checkDatabase,
@@ -1155,6 +1170,136 @@ describe('configuración (/settings)', () => {
       footer: '¡Gracias por su compra!',
     })
     expect(receipt.body.taxBreakdown).toEqual([expect.objectContaining({ rate: 0.08 })])
+  })
+})
+
+describe('ShelfSight (/shelf-events)', () => {
+  // JPEG mínimo: el servidor solo revisa la firma del archivo y el tamaño
+  const jpeg = `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]).toString('base64')}`
+  const frames = { cameraId: 'iphone-repisa-1', beforeImage: jpeg, afterImage: jpeg, changeRatio: 0.05 }
+  const sees = (analysis: Partial<ShelfAnalysis>) => {
+    shelfVision.next = { action: ShelfAction.REMOVED, productId: 'SHELF-COCA', quantity: 1, confidence: 0.95, reason: 'Se llevaron una', ...analysis }
+  }
+  const stock = async () => (await call('GET', '/api/v1/products/SHELF-COCA', { token: ownerToken })).body.stock as number
+  const post = () => call('POST', '/api/v1/shelf-events', { token: ownerToken, body: frames })
+
+  beforeAll(async () => {
+    const created = await call('POST', '/api/v1/products', {
+      token: ownerToken,
+      body: { id: 'SHELF-COCA', name: 'Coca-Cola 600 ml (repisa)', categoryId, price: 20, purchaseCost: 12, initialStock: 10 },
+    })
+    expect(created.status).toBe(201)
+  })
+
+  test('GET /shelf/vision informa el modelo y las reglas', async () => {
+    const res = await call('GET', '/api/v1/shelf/vision', { token: ownerToken })
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({ visionEnabled: true, model: 'fake-vision' })
+    expect((await call('GET', '/api/v1/shelf/vision', { token: customerToken })).status).toBe(403)
+  })
+
+  test('una salida con confianza alta se aplica sola al inventario', async () => {
+    sees({ quantity: 2 })
+    const res = await post()
+    expect(res.status).toBe(201)
+    expect(res.body).toMatchObject({
+      status: 'APPLIED',
+      action: 'REMOVED',
+      quantity: 2,
+      product: { id: 'SHELF-COCA', name: 'Coca-Cola 600 ml (repisa)' },
+      reviewReason: null,
+      changeRatio: 0.05,
+    })
+    expect(await stock()).toBe(8)
+    const movements = await call('GET', '/api/v1/inventory/movements?productId=SHELF-COCA', { token: ownerToken })
+    expect(movements.body.data[0]).toMatchObject({ id: res.body.movementId, type: 'ADJUSTMENT', quantityDelta: -2, stockAfter: 8 })
+    expect(movements.body.data[0].note).toContain('ShelfSight')
+  })
+
+  test('una entrada (resurtido) suma con RESTOCK', async () => {
+    sees({ action: ShelfAction.ADDED, quantity: 3 })
+    const res = await post()
+    expect(res.body.status).toBe('APPLIED')
+    expect(await stock()).toBe(11)
+  })
+
+  test('con confianza baja queda en revisión; el dueño confirma y se aplica una sola vez', async () => {
+    sees({ confidence: 0.4 })
+    const res = await post()
+    expect(res.body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'LOW_CONFIDENCE', movementId: null })
+    expect(await stock()).toBe(11)
+
+    const confirmPath = `/api/v1/shelf-events/${res.body.id}/confirm`
+    const body = { action: 'REMOVED', productId: 'SHELF-COCA', quantity: 4 }
+    const confirmed = await call('POST', confirmPath, { token: ownerToken, body })
+    expect(confirmed.status).toBe(200)
+    expect(confirmed.body).toMatchObject({ status: 'APPLIED', quantity: 4, reviewReason: null })
+    expect(confirmed.body.movementId).toBeString()
+    expect(await stock()).toBe(7)
+
+    const again = await call('POST', confirmPath, { token: ownerToken, body })
+    expect([again.status, again.body.error.code]).toEqual([409, 'SHELF_EVENT_RESOLVED'])
+    expect(await stock()).toBe(7)
+  })
+
+  test('si la confirmación falla por stock, el evento vuelve a revisión', async () => {
+    sees({ confidence: 0.2 })
+    const res = await post()
+    const confirmPath = `/api/v1/shelf-events/${res.body.id}/confirm`
+    const tooMany = await call('POST', confirmPath, { token: ownerToken, body: { action: 'REMOVED', productId: 'SHELF-COCA', quantity: 50 } })
+    expect([tooMany.status, tooMany.body.error.code]).toEqual([409, 'INSUFFICIENT_STOCK'])
+    const detail = await call('GET', `/api/v1/shelf-events/${res.body.id}`, { token: ownerToken })
+    expect(detail.body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'LOW_CONFIDENCE', resolvedAt: null })
+  })
+
+  test('producto desconocido, demasiadas piezas, stock insuficiente o error del modelo → revisión sin tocar el stock', async () => {
+    sees({ productId: 'NO-EXISTE' })
+    expect((await post()).body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'UNKNOWN_PRODUCT', product: null })
+    sees({ quantity: 7 })
+    expect((await post()).body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'QUANTITY_TOO_HIGH' })
+    sees({ quantity: 6, action: ShelfAction.REMOVED })
+    await post() // stock 7 → 1
+    sees({ quantity: 2 })
+    expect((await post()).body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'INSUFFICIENT_STOCK' })
+    shelfVision.next = new Error('HTTP 429')
+    const failed = await post()
+    expect(failed.body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'VISION_ERROR', action: 'NONE' })
+    expect(failed.body.note).toContain('HTTP 429')
+    expect(await stock()).toBe(1)
+  })
+
+  test('el modelo puede contestar con el nombre del producto en lugar del SKU', async () => {
+    sees({ action: ShelfAction.ADDED, productId: 'coca-cola 600 ML (repisa)', quantity: 1 })
+    expect((await post()).body).toMatchObject({ status: 'APPLIED', product: { id: 'SHELF-COCA' } })
+  })
+
+  test('sin cambio → NO_CHANGE; el dueño puede descartarlo', async () => {
+    sees({ action: ShelfAction.NONE, quantity: 0 })
+    const res = await post()
+    expect(res.body.status).toBe('NO_CHANGE')
+    const rejected = await call('POST', `/api/v1/shelf-events/${res.body.id}/reject`, { token: ownerToken })
+    expect([rejected.status, rejected.body.status]).toEqual([200, 'REJECTED'])
+    const again = await call('POST', `/api/v1/shelf-events/${res.body.id}/reject`, { token: ownerToken })
+    expect(again.status).toBe(409)
+  })
+
+  test('detalle con fotos, bitácora filtrada y validaciones', async () => {
+    const list = await call('GET', '/api/v1/shelf-events?status=PENDING_REVIEW&limit=100', { token: ownerToken })
+    expect(list.status).toBe(200)
+    expect(list.body.data.length).toBeGreaterThan(0)
+    expect(list.body.data.every((event: Json) => event.status === 'PENDING_REVIEW')).toBe(true)
+    expect(list.body.data[0].beforeImage).toBeUndefined()
+
+    const detail = await call('GET', `/api/v1/shelf-events/${list.body.data[0].id}`, { token: ownerToken })
+    expect(detail.body.beforeImage).toBe(jpeg)
+    expect(detail.body.afterImage).toBe(jpeg)
+
+    const missing = await call('GET', '/api/v1/shelf-events/00000000-0000-4000-8000-000000000000', { token: ownerToken })
+    expect([missing.status, missing.body.error.code]).toEqual([404, 'SHELF_EVENT_NOT_FOUND'])
+
+    const notImage = `data:image/jpeg;base64,${Buffer.alloc(200, 7).toString('base64')}`
+    const bad = await call('POST', '/api/v1/shelf-events', { token: ownerToken, body: { ...frames, afterImage: notImage } })
+    expect([bad.status, bad.body.error.code]).toEqual([400, 'INVALID_IMAGE'])
   })
 })
 

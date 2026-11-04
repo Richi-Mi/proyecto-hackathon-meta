@@ -53,6 +53,11 @@ SEED_CUSTOMER_PASSWORD=
 ENABLE_STORE_SIMULATOR=true
 
 STORE_TIMEZONE=America/Mexico_City
+
+# ShelfSight · cámara de repisa (sin llave, los eventos quedan en revisión manual)
+VISION_API_URL=https://api.meta.ai/v1
+VISION_API_KEY=
+VISION_MODEL=muse-spark-1.3
 ```
 
 ### Opcionales
@@ -64,6 +69,10 @@ STORE_TIMEZONE=America/Mexico_City
 | `SEED_OWNER_NAME` / `SEED_CUSTOMER_NAME` | `Propietario` / `Cliente Demo` | |
 | `MOCK_PAYMENT_FAILURE_RATE` | `0` | Probabilidad de que la pasarela simulada rechace un cobro |
 | `JWT_EXPIRES_IN_SECONDS` | `28800` | 8 h |
+| `VISION_JSON_MODE` | `true` | `false` si el proveedor de visión rechaza `response_format` con imágenes |
+| `VISION_TIMEOUT_MS` | `30000` | Tiempo máximo de la llamada al modelo de visión |
+| `SHELF_AUTO_APPLY_CONFIDENCE` | `0.75` | Confianza mínima para aplicar un evento de repisa sin revisión |
+| `SHELF_MAX_AUTO_QUANTITY` | `6` | Más piezas en un solo evento → revisión |
 | `OTEL_ENABLED` | `false` | Si lo activas, apunta `OTEL_EXPORTER_OTLP_ENDPOINT` a un colector OTLP/HTTP |
 
 `NODE_ENV`, `FRONTEND_DIST` y `PORT` ya los fija el Dockerfile; Railway sobrescribe `PORT` con el suyo. `CORS_ORIGINS` no hace falta porque el frontend y la API comparten dominio.

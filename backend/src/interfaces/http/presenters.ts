@@ -1,6 +1,7 @@
 import type { Page } from '../../application/common/pagination'
 import type { Category } from '../../domain/models/category'
 import type { InventoryMovement } from '../../domain/models/inventory'
+import type { ShelfEvent } from '../../domain/models/shelf-event'
 import { isLowStock, type Product } from '../../domain/models/product'
 import { itemCount, type Sale } from '../../domain/models/sale'
 import type { StoreSettings } from '../../domain/models/store-settings'
@@ -116,4 +117,22 @@ export const presentSettings = (settings: StoreSettings) => ({
   ticketFooter: settings.ticketFooter,
   peripherals: settings.peripherals,
   ...(settings.updatedAt && { updatedAt: settings.updatedAt.toISOString() }),
+})
+
+export const presentShelfEvent = (event: ShelfEvent) => ({
+  id: event.id,
+  cameraId: event.cameraId,
+  status: event.status,
+  action: event.action,
+  product: event.productId ? { id: event.productId, name: event.productName } : null,
+  quantity: event.quantity,
+  confidence: event.confidence,
+  reviewReason: event.reviewReason,
+  note: event.note,
+  model: event.model,
+  changeRatio: event.changeRatio,
+  movementId: event.movementId,
+  capturedAt: event.capturedAt.toISOString(),
+  createdAt: event.createdAt.toISOString(),
+  resolvedAt: event.resolvedAt?.toISOString() ?? null,
 })

@@ -46,3 +46,23 @@ export enum MovementType {
   RESTOCK = 'RESTOCK',
   ADJUSTMENT = 'ADJUSTMENT',
 }
+
+/** Resultado de un evento de la cámara de repisa (ShelfSight). */
+export enum ShelfEventStatus {
+  /** El movimiento de inventario ya se aplicó (automático o confirmado por el dueño). */
+  APPLIED = 'APPLIED',
+  /** Espera a que el dueño lo confirme o lo descarte. */
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  /** El modelo no vio cambio de producto (alguien pasó la mano, se acomodó algo). */
+  NO_CHANGE = 'NO_CHANGE',
+  /** El dueño lo descartó. */
+  REJECTED = 'REJECTED',
+}
+
+/** Lo que la visión cree que pasó en la repisa. */
+export enum ShelfAction {
+  REMOVED = 'REMOVED',
+  ADDED = 'ADDED',
+  MOVED = 'MOVED',
+  NONE = 'NONE',
+}

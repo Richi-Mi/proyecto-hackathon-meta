@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Smart Abarrotes API
-  version: 1.0.7
+  version: 1.0.8
   description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
 servers:
   - url: http://localhost:3000/api/v1
@@ -16,6 +16,7 @@ tags:
   - { name: Sales }
   - { name: Reports }
   - { name: Settings }
+  - { name: Shelf, description: 'ShelfSight: cámara de repisa, eventos antes/después y cola de revisión' }
   - { name: Dev, description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production o ENABLE_STORE_SIMULATOR=true' }
 
 paths:
@@ -735,6 +736,133 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ---------------- SHELF (ShelfSight) ----------------
+  /shelf/vision:
+    get:
+      operationId: getShelfVisionStatus
+      tags: [Shelf]
+      summary: Modelo de visión configurado y reglas de aplicación automática
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShelfVisionStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /shelf-events:
+    post:
+      operationId: createShelfEvent
+      tags: [Shelf]
+      summary: Interacción con la repisa (foto antes/después) → visión → movimiento de inventario o revisión
+      description: |
+        La cámara (un teléfono con la sesión del dueño) envía la foto de antes y la de después de una interacción.
+        El servidor pide al modelo de visión qué producto del catálogo cambió y cuántas piezas.
+        Se aplica solo si el producto existe, la confianza ≥ `autoApplyConfidence`, la cantidad ≤ `maxAutoQuantity`
+        y (en una salida) hay stock suficiente. Salida = movimiento ADJUSTMENT negativo; entrada = RESTOCK.
+        Si no, queda en `PENDING_REVIEW` con `reviewReason` y el stock no cambia. Sin modelo configurado, todo va a revisión.
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShelfEventCreateRequest' }
+      responses:
+        '201':
+          description: Evento registrado (aplicado, sin cambio o en revisión)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShelfEvent' }
+        '400': { description: 'VALIDATION_ERROR | INVALID_IMAGE | INVALID_CAPTURED_AT', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      operationId: listShelfEvents
+      tags: [Shelf]
+      summary: Bitácora de eventos de repisa (más recientes primero)
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ShelfEventStatus' } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ShelfEvent' } }
+                  meta: { $ref: '#/components/schemas/PaginationMeta' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /shelf-events/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getShelfEvent
+      tags: [Shelf]
+      summary: Detalle de un evento con sus fotos
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShelfEventDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: SHELF_EVENT_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /shelf-events/{id}/confirm:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: confirmShelfEvent
+      tags: [Shelf]
+      summary: El dueño confirma o corrige el evento y se aplica al inventario
+      description: Solo para eventos `PENDING_REVIEW` o `NO_CHANGE`. Los datos enviados reemplazan lo que interpretó la visión.
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShelfEventConfirmRequest' }
+      responses:
+        '200':
+          description: Evento aplicado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShelfEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'SHELF_EVENT_NOT_FOUND | PRODUCT_NOT_FOUND', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'SHELF_EVENT_RESOLVED | INSUFFICIENT_STOCK', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /shelf-events/{id}/reject:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectShelfEvent
+      tags: [Shelf]
+      summary: El dueño descarta el evento (el stock no cambia)
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: Evento descartado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShelfEvent' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: SHELF_EVENT_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: SHELF_EVENT_RESOLVED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1227,3 +1355,66 @@ components:
         defaultTaxRate: { $ref: '#/components/schemas/TaxRate' }
         ticketFooter: { type: [string, 'null'], maxLength: 500 }
         peripherals: { $ref: '#/components/schemas/Peripherals' }
+
+    ShelfEventStatus: { type: string, enum: [APPLIED, PENDING_REVIEW, NO_CHANGE, REJECTED] }
+    ShelfAction: { type: string, enum: [REMOVED, ADDED, MOVED, NONE] }
+    ShelfReviewReason: { type: string, enum: [VISION_UNAVAILABLE, VISION_ERROR, UNKNOWN_PRODUCT, LOW_CONFIDENCE, QUANTITY_TOO_HIGH, INSUFFICIENT_STOCK] }
+    ShelfEventCreateRequest:
+      type: object
+      required: [cameraId, beforeImage, afterImage]
+      properties:
+        cameraId: { type: string, minLength: 1, maxLength: 64, examples: [iphone-repisa-1] }
+        capturedAt: { type: string, format: date-time }
+        changeRatio: { type: number, minimum: 0, maximum: 1, description: Fracción de la imagen que cambió (detector del teléfono) }
+        beforeImage: { type: string, minLength: 100, maxLength: 4200000, description: 'JPEG/PNG/WebP como data URL o base64; máx. 3 MB' }
+        afterImage: { type: string, minLength: 100, maxLength: 4200000, description: 'JPEG/PNG/WebP como data URL o base64; máx. 3 MB' }
+    ShelfEvent:
+      type: object
+      required: [id, cameraId, status, action, product, quantity, confidence, reviewReason, note, model, changeRatio, movementId, capturedAt, createdAt, resolvedAt]
+      properties:
+        id: { type: string, format: uuid }
+        cameraId: { type: string }
+        status: { $ref: '#/components/schemas/ShelfEventStatus' }
+        action: { $ref: '#/components/schemas/ShelfAction' }
+        product:
+          type: [object, 'null']
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: [string, 'null'] }
+        quantity: { type: integer, minimum: 0 }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        reviewReason:
+          oneOf:
+            - { $ref: '#/components/schemas/ShelfReviewReason' }
+            - { type: 'null' }
+        note: { type: [string, 'null'], description: Explicación del modelo o del error }
+        model: { type: [string, 'null'] }
+        changeRatio: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        movementId: { type: [string, 'null'], format: uuid }
+        capturedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+    ShelfEventDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ShelfEvent' }
+        - type: object
+          required: [beforeImage, afterImage]
+          properties:
+            beforeImage: { type: string, description: data URL }
+            afterImage: { type: string, description: data URL }
+    ShelfEventConfirmRequest:
+      type: object
+      required: [action, productId, quantity]
+      properties:
+        action: { type: string, enum: [REMOVED, ADDED] }
+        productId: { type: string, minLength: 1, maxLength: 64 }
+        quantity: { type: integer, minimum: 1, maximum: 999 }
+    ShelfVisionStatus:
+      type: object
+      required: [visionEnabled, model, autoApplyConfidence, maxAutoQuantity]
+      properties:
+        visionEnabled: { type: boolean }
+        model: { type: [string, 'null'] }
+        autoApplyConfidence: { type: number, minimum: 0, maximum: 1 }
+        maxAutoQuantity: { type: integer, minimum: 1 }

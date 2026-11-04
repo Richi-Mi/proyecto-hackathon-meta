@@ -100,6 +100,11 @@ export const router = createBrowserRouter([
                     lazy: lazyPage(() => import('@/features/admin/pages/InventoryPage'), (m) => m.InventoryPage),
                   },
                   { path: 'sales', lazy: lazyPage(() => import('@/features/admin/pages/SalesPage'), (m) => m.SalesPage) },
+                  {
+                    path: 'shelf',
+                    lazy: lazyPage(() => import('@/features/admin/pages/ShelfEventsPage'), (m) => m.ShelfEventsPage),
+                  },
+                  { path: 'camera', lazy: lazyPage(() => import('@/features/admin/pages/CameraPage'), (m) => m.CameraPage) },
                   { path: 'settings', lazy: lazyPage(() => import('@/features/admin/pages/SettingsPage'), (m) => m.SettingsPage) },
                 ],
               },

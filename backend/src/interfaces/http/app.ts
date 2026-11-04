@@ -9,6 +9,7 @@ import type { ProductUseCases } from '../../application/products/product.use-cas
 import type { ReportUseCases } from '../../application/reports/report.use-cases'
 import type { SaleUseCases } from '../../application/sales/sale.use-cases'
 import type { SettingsUseCases } from '../../application/settings/settings.use-cases'
+import type { ShelfUseCases } from '../../application/shelf/shelf.use-cases'
 import type { StoreUseCases } from '../../application/store/store.use-cases'
 import { createAuthPlugin } from './plugins/auth.plugin'
 import { errorHandler } from './plugins/error-handler'
@@ -23,6 +24,7 @@ import { productRoutes } from './routes/product.routes'
 import { reportRoutes } from './routes/report.routes'
 import { saleRoutes } from './routes/sale.routes'
 import { settingsRoutes } from './routes/settings.routes'
+import { shelfRoutes } from './routes/shelf.routes'
 import { storeRoutes } from './routes/store.routes'
 
 export interface AppDependencies {
@@ -36,6 +38,7 @@ export interface AppDependencies {
     reports: ReportUseCases
     settings: SettingsUseCases
     store: StoreUseCases
+    shelf: ShelfUseCases
   }
   checkDatabase: () => Promise<boolean>
   config: {
@@ -65,6 +68,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
     .use(reportRoutes(auth, useCases.reports))
     .use(settingsRoutes(auth, useCases.settings))
     .use(storeRoutes(useCases.store))
+    .use(shelfRoutes(auth, useCases.shelf))
     .use(config.devTools ? devRoutes(auth, useCases.store) : new Elysia({ name: 'dev-tools-disabled' }))
 
   return new Elysia()
@@ -78,7 +82,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
         documentation: {
           info: {
             title: 'Smart Abarrotes API',
-            version: '1.0.7',
+            version: '1.0.8',
             description:
               'Endpoints implementados. El contrato completo (fuente de verdad SDD) está en docs/specs/openapi.yaml.',
           },
@@ -93,6 +97,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
             { name: 'Reports' },
             { name: 'Settings' },
             { name: 'Store Devices', description: 'Escáner de entrada y sistema de cámaras' },
+            { name: 'Shelf', description: 'ShelfSight: cámara de repisa, eventos antes/después y cola de revisión' },
             {
               name: 'Dev',
               description: 'Herramientas de demostración; solo existen si NODE_ENV ≠ production o ENABLE_STORE_SIMULATOR=true',

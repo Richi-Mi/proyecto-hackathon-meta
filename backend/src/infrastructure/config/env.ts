@@ -27,6 +27,21 @@ const EnvSchema = Type.Object({
   /** Cliente que usa el simulador de visitas (el mismo que crea el seed) */
   SEED_CUSTOMER_EMAIL: Type.String({ default: 'cliente@smart-abarrotes.mx' }),
 
+  /**
+   * ShelfSight · modelo de visión por una API compatible con OpenAI (`/chat/completions` con imágenes).
+   * Por defecto Muse Spark en Meta Model API; también sirve Llama Vision en Groq u OpenRouter cambiando estas variables.
+   * Sin `VISION_API_KEY`, los eventos de la cámara se guardan y quedan en revisión manual.
+   */
+  VISION_API_URL: Type.String({ default: 'https://api.meta.ai/v1' }),
+  VISION_API_KEY: Type.String({ default: '' }),
+  VISION_MODEL: Type.String({ default: 'muse-spark-1.3' }),
+  VISION_TIMEOUT_MS: Type.Integer({ minimum: 1000, maximum: 120_000, default: 30_000 }),
+  VISION_JSON_MODE: Type.Boolean({ default: true }),
+  /** Confianza mínima (0–1) para aplicar un evento de repisa sin revisión */
+  SHELF_AUTO_APPLY_CONFIDENCE: Type.Number({ minimum: 0, maximum: 1, default: 0.75 }),
+  /** Más piezas que esto en un solo evento → revisión */
+  SHELF_MAX_AUTO_QUANTITY: Type.Integer({ minimum: 1, maximum: 999, default: 6 }),
+
   /** Zona IANA de la tienda: los reportes agrupan por día/semana/mes en hora local */
   STORE_TIMEZONE: Type.String({ default: 'America/Mexico_City' }),
 
