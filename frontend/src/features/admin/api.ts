@@ -1,6 +1,8 @@
 import { adminApi } from '@/lib/api/client'
 import type {
   Category,
+  CheckoutResult,
+  GateCheckoutRequest,
   CategoryInput,
   InventoryMovement,
   InventorySummary,
@@ -21,8 +23,11 @@ import type {
   ShelfVisionStatus,
   SimulatedVisit,
   StockAdjustmentRequest,
+  StoreEntryResponse,
   StoreSettings,
   StoreSettingsUpdate,
+  StoreVisit,
+  VisitStatus,
   TopProduct,
   TrendPoint,
 } from '@/lib/api/types'
@@ -144,3 +149,16 @@ export const confirmShelfEvent = async (id: string, confirmation: ShelfEventConf
   (await adminApi.post<ShelfEvent>(`/shelf-events/${id}/confirm`, confirmation)).data
 
 export const rejectShelfEvent = async (id: string) => (await adminApi.post<ShelfEvent>(`/shelf-events/${id}/reject`)).data
+
+// ── Puerta operada desde el teléfono del propietario ─────────────────────────
+
+/** Contenido del QR del cliente → abre su visita. QR inválido o expirado = 422 `INVALID_ENTRY_TOKEN`. */
+export const admitAtGate = async (token: string, gateId?: string) =>
+  (await adminApi.post<StoreEntryResponse>('/store-visits', { token, ...(gateId && { gateId }) })).data
+
+export const fetchStoreVisits = async (query: { status?: VisitStatus; limit?: number }, signal?: AbortSignal) =>
+  (await adminApi.get<StoreVisit[]>('/store-visits', { params: query, signal })).data
+
+/** `items` vacío = el cliente salió sin comprar */
+export const checkoutAtGate = async (visitId: string, items: GateCheckoutRequest['items']) =>
+  (await adminApi.post<CheckoutResult>(`/store-visits/${visitId}/checkout`, { items })).data

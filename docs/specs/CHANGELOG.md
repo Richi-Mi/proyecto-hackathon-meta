@@ -1,5 +1,14 @@
 # Changelog del contrato (`openapi.yaml`)
 
+## 1.0.9 — 2026-11-04
+
+Puerta de entrada operada por el propietario desde su teléfono (tag **Store Gate**, solo OWNER). Sustituye al escáner físico y a las cámaras de salida mientras no existan; sin cambios incompatibles.
+
+- **`POST /store-visits`**: el teléfono del propietario lee el QR del cliente (`GET /me/entry-pass`) y abre la visita. Mismo caso de uso que `POST /store/entry`, autenticado con la sesión del propietario en lugar de `X-Device-Key`. Un QR inválido responde **422** `INVALID_ENTRY_TOKEN` (no 401, que el frontend interpreta como sesión vencida).
+- **`GET /store-visits`**: clientes dentro de la tienda (`status` por defecto `ACTIVE`, `limit` ≤ 100).
+- **`POST /store-visits/{id}/checkout`**: el propietario registra lo que se llevó el cliente. Mismo caso de uso que `POST /webhooks/checkout` (venta AUTOMATED, cobro `CARD_ON_FILE`, descuento de stock); `items` vacío cierra la visita sin venta.
+- Esquemas nuevos: `StoreVisit`, `VisitStatus`, `GateEntryRequest`, `GateCheckoutRequest`. Sin cambios en el ERD.
+
 ## 1.0.8 — 2026-11-04
 
 ShelfSight: cámara de repisa. Rutas nuevas (tag **Shelf**, solo OWNER); sin cambios incompatibles.

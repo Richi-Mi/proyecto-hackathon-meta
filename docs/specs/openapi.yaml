@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Smart Abarrotes API
-  version: 1.0.8
+  version: 1.0.9
   description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
 servers:
   - url: http://localhost:3000/api/v1
@@ -10,6 +10,7 @@ tags:
   - { name: Auth }
   - { name: Customer, description: Portal del cliente (PWA) }
   - { name: Store Devices, description: Escáner de entrada y sistema de cámaras }
+  - { name: Store Gate, description: 'Puerta operada por el propietario desde su teléfono: escanea el QR del cliente y registra su salida' }
   - { name: Categories }
   - { name: Products }
   - { name: Inventory }
@@ -223,6 +224,81 @@ paths:
         '401': { description: Firma inválida, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Visita o producto desconocido, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: Visita ya cerrada con otro eventId (VISIT_CLOSED) o eventId de otra visita (EVENT_ID_CONFLICT), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ---------------- STORE GATE (propietario) ----------------
+  /store-visits:
+    post:
+      operationId: admitStoreVisit
+      tags: [Store Gate]
+      summary: El propietario escanea el QR del cliente con su teléfono y abre la visita
+      description: |
+        Mismo caso de uso que `POST /store/entry`, pero autenticado con la sesión del propietario en lugar de `X-Device-Key`
+        (no hay escáner físico: el teléfono del dueño hace de puerta). Si el cliente ya tenía una visita ACTIVE, se marca ABANDONED.
+        Un QR inválido responde **422** (no 401) para no confundirlo con la sesión del propietario.
+        Errores: 403 `ACCOUNT_DISABLED` · 409 `ENTRY_TOKEN_REUSED` · 422 `INVALID_ENTRY_TOKEN` (firma, tipo o expiración).
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GateEntryRequest' }
+      responses:
+        '201':
+          description: Visita creada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreEntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Rol insuficiente o cuenta del cliente desactivada (ACCOUNT_DISABLED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Token ya utilizado (ENTRY_TOKEN_REUSED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: QR inválido o expirado (INVALID_ENTRY_TOKEN), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    get:
+      operationId: listStoreVisits
+      tags: [Store Gate]
+      summary: Visitas a la tienda (por defecto, los clientes que están dentro ahora)
+      description: Más recientes primero.
+      security: [{ bearerAuth: [OWNER] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/VisitStatus' }, description: 'Por defecto ACTIVE' }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/StoreVisit' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /store-visits/{id}/checkout:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkoutStoreVisit
+      tags: [Store Gate]
+      summary: El propietario registra la salida del cliente con lo que se llevó → venta AUTOMATED + cobro + descuento de stock
+      description: |
+        Mismo caso de uso que `POST /webhooks/checkout` (mismas reglas de venta, cobro con `CARD_ON_FILE` y stock), con `exitedAt` = ahora
+        y un `eventId` generado por el servidor. Si `items` está vacío se cierra la visita sin venta.
+        Errores: 400 `VALIDATION_ERROR`, `ITEM_CODE_REQUIRED` · 404 `VISIT_NOT_FOUND`, `PRODUCT_NOT_FOUND` · 409 `VISIT_CLOSED`.
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GateCheckoutRequest' }
+      responses:
+        '200':
+          description: Visita cerrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CheckoutWebhookResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'Visita o producto desconocido (VISIT_NOT_FOUND, PRODUCT_NOT_FOUND)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: La visita ya estaba cerrada o abandonada (VISIT_CLOSED), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ---------------- DEV ----------------
   /dev/simulate-visit:
@@ -1023,6 +1099,44 @@ components:
             - { $ref: '#/components/schemas/PaymentStatus' }
             - { type: 'null' }
         itemCount: { type: integer, description: Piezas totales que se llevó }
+    VisitStatus: { type: string, enum: [ACTIVE, COMPLETED, ABANDONED] }
+    StoreVisit:
+      type: object
+      required: [id, customer, gateId, status, enteredAt, exitedAt]
+      properties:
+        id: { type: string, format: uuid }
+        customer:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        gateId: { type: string }
+        status: { $ref: '#/components/schemas/VisitStatus' }
+        enteredAt: { type: string, format: date-time }
+        exitedAt: { type: [string, 'null'], format: date-time }
+    GateEntryRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, minLength: 1, maxLength: 2048, description: Contenido del QR del cliente (JWT de `GET /me/entry-pass`) }
+        gateId: { type: string, minLength: 1, maxLength: 64, default: PUERTA-TELEFONO, description: Identificador de la puerta o del teléfono que escanea }
+    GateCheckoutRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          description: Vacío = el cliente salió sin comprar
+          items:
+            type: object
+            required: [quantity]
+            description: Requiere `productId` o `barcode` (400 `ITEM_CODE_REQUIRED`); si vienen ambos se usa `productId`.
+            properties:
+              productId: { type: string, minLength: 1, maxLength: 64 }
+              barcode: { type: string, minLength: 1, maxLength: 64 }
+              quantity: { type: integer, minimum: 1, maximum: 999 }
 
     Category:
       type: object

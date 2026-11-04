@@ -1,7 +1,7 @@
 # Smart Abarrotes — estado del proyecto y siguientes pasos
 
 Documento de traspaso entre sesiones de trabajo. Léelo completo antes de continuar.
-Última actualización: 2026-11-04 (cámara de repisa **ShelfSight**, contrato v1.0.8). **El contrato está implementado completo.**
+Última actualización: 2026-11-04 (puerta de entrada con QR desde el teléfono del propietario, contrato v1.0.9). **El contrato está implementado completo.**
 
 ---
 
@@ -14,7 +14,7 @@ Sistema de administración y punto de venta para una tienda de abarrotes **híbr
 
 **Forma de trabajo acordada con el usuario:**
 
-- **Spec-Driven Design.** La fuente de verdad es `docs/specs/openapi.yaml`, que va en v1.0.7 y tiene su historial en `docs/specs/CHANGELOG.md`, y `docs/specs/erd.md`. Si la implementación descubre algo, primero se ajusta el contrato (sube versión y CHANGELOG) y después el código.
+- **Spec-Driven Design.** La fuente de verdad es `docs/specs/openapi.yaml`, que va en v1.0.9 y tiene su historial en `docs/specs/CHANGELOG.md`, y `docs/specs/erd.md`. Si la implementación descubre algo, primero se ajusta el contrato (sube versión y CHANGELOG) y después el código.
 - **Paso por paso:** se termina un bloque y **se detiene para que el usuario revise** antes del siguiente.
 - **Comunicación en español.** **No hacer commits** salvo que el usuario lo pida. El último commit del usuario es `e5c2eca Bloque 3 terminado`; los pasos 1–5 están sin commitear.
 - **Nunca escribir contraseñas en el chat.** Están en `backend/.env`.
@@ -90,9 +90,11 @@ bunx --bun @redocly/cli@1 lint docs/specs/openapi.yaml     # desde la raíz
 | Paso 3 | `/me/purchases(/{id})`, `GET /sales`, `/sales/{id}/receipt`, `POST /sales/{id}/cancel` + pantallas Mis compras e Historial de ventas |
 | Paso 4 | Flujo automático: `POST /store/entry`, `POST /webhooks/checkout`, pasarela simulada, reembolso al cancelar, `POST /dev/simulate-visit`, `simulate:store`, botón "Simular visita" en el dashboard, Mis compras se refresca al volver a la app |
 | Paso 5 | `GET/PATCH /settings` (contrato v1.0.6) + pantalla Configuración: perfil del negocio, IVA por defecto, pie del ticket, periféricos, vista previa del ticket y prueba de impresora (ESC/POS por WebUSB / Web Bluetooth, o diálogo del navegador) |
+| Puerta con QR (2026-11-04) | Contrato v1.0.9, tag **Store Gate** (solo OWNER, siempre montado): `POST /store-visits` (el teléfono del dueño lee el QR del cliente; mismo caso de uso que `/store/entry`, pero un QR inválido da **422** `INVALID_ENTRY_TOKEN` porque un 401 cerraría la sesión del dueño), `GET /store-visits` (activas por defecto) y `POST /store-visits/{id}/checkout` (mismo caso de uso que el webhook; `items` vacío = salió sin comprar). **Frontend:** `/admin/gate` ("Entrada (QR)" en Operación): cámara trasera, decodificación con `BarcodeDetector` si existe y si no `jsqr` (`features/admin/gate/qr-decoder.ts`), lista "En la tienda ahora" con polling de 5 s y `GateCheckoutDialog` (reutiliza `CatalogGrid` del POS, botón "Al azar"). 4 pruebas nuevas (77 en total) |
+| Producción (2026-11-04) | Railway **ignora `railway.json`** (el manifiesto del deploy trae `preDeployCommand: null`), así que nunca corrieron migraciones ni seed y el registro dio `relation "users" does not exist`. Arreglo: `src/index.ts` aplica las migraciones pendientes al arrancar con `NODE_ENV=production`, y el seed se corrió a mano con `railway ssh --service proyecto-hackathon-meta -- 'cd /app/backend && bun run db:seed'`. **Pendiente del usuario:** poner el Pre-deploy (`bun run db:prepare`) y el healthcheck en *Settings → Deploy* del dashboard |
 | Despliegue | Railway con 1 servicio + Postgres (contrato v1.0.7, solo documentación): `Dockerfile` en la raíz (compila el frontend; el backend lo sirve con `FRONTEND_DIST`), `railway.json` (pre-deploy `bun run db:prepare` = migraciones + seed idempotente; healthcheck `/api/v1/health`), `ENABLE_STORE_SIMULATOR=true` monta `/dev` en producción y muestra el botón. Guía: `docs/DEPLOY-RAILWAY.md`. **Desplegado el 2026-11-04** en https://proyecto-hackathon-meta-production.up.railway.app (el dominio apunta al puerto 3000) |
 
-`bun run check:contract` reporta: **34 operaciones sin diferencias, 0 pendientes**.
+`bun run check:contract` reporta: **43 operaciones sin diferencias, 0 pendientes**.
 
 ### Cómo quedó el flujo automático (paso 4)
 

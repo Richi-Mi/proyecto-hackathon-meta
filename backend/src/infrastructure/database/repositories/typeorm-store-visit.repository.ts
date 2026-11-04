@@ -1,8 +1,13 @@
 import type { DataSource, EntityManager } from 'typeorm'
-import type { NewStoreVisit, StoreVisitRepository, VisitClosing } from '../../../application/ports/store-visit-repository'
+import type {
+  NewStoreVisit,
+  StoreVisitQuery,
+  StoreVisitRepository,
+  VisitClosing,
+} from '../../../application/ports/store-visit-repository'
 import { VisitStatus } from '../../../domain/enums'
 import { ConflictError } from '../../../domain/errors'
-import type { StoreVisit } from '../../../domain/models/store-visit'
+import type { StoreVisit, StoreVisitWithCustomer } from '../../../domain/models/store-visit'
 import { StoreVisitEntity, UserEntity } from '../entities'
 import { uniqueViolationColumn } from '../pg-errors'
 
@@ -42,6 +47,16 @@ export class TypeOrmStoreVisitRepository implements StoreVisitRepository {
   async findByExitEventId(exitEventId: string): Promise<StoreVisit | null> {
     const visit = await this.dataSource.getRepository(StoreVisitEntity).findOneBy({ exitEventId })
     return visit ? toVisit(visit) : null
+  }
+
+  async list({ status, limit }: StoreVisitQuery): Promise<StoreVisitWithCustomer[]> {
+    const visits = await this.dataSource.getRepository(StoreVisitEntity).find({
+      where: { status },
+      relations: { user: true },
+      order: { enteredAt: 'DESC' },
+      take: limit,
+    })
+    return visits.map((visit) => ({ ...toVisit(visit), customer: { id: visit.user.id, name: visit.user.name } }))
   }
 }
 

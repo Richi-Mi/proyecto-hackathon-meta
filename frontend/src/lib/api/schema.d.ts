@@ -196,6 +196,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/store-visits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Visitas a la tienda (por defecto, los clientes que están dentro ahora)
+         * @description Más recientes primero.
+         */
+        get: operations["listStoreVisits"];
+        put?: never;
+        /**
+         * El propietario escanea el QR del cliente con su teléfono y abre la visita
+         * @description Mismo caso de uso que `POST /store/entry`, pero autenticado con la sesión del propietario en lugar de `X-Device-Key`
+         *     (no hay escáner físico: el teléfono del dueño hace de puerta). Si el cliente ya tenía una visita ACTIVE, se marca ABANDONED.
+         *     Un QR inválido responde **422** (no 401) para no confundirlo con la sesión del propietario.
+         *     Errores: 403 `ACCOUNT_DISABLED` · 409 `ENTRY_TOKEN_REUSED` · 422 `INVALID_ENTRY_TOKEN` (firma, tipo o expiración).
+         */
+        post: operations["admitStoreVisit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/store-visits/{id}/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * El propietario registra la salida del cliente con lo que se llevó → venta AUTOMATED + cobro + descuento de stock
+         * @description Mismo caso de uso que `POST /webhooks/checkout` (mismas reglas de venta, cobro con `CARD_ON_FILE` y stock), con `exitedAt` = ahora
+         *     y un `eventId` generado por el servidor. Si `items` está vacío se cierra la visita sin venta.
+         *     Errores: 400 `VALIDATION_ERROR`, `ITEM_CODE_REQUIRED` · 404 `VISIT_NOT_FOUND`, `PRODUCT_NOT_FOUND` · 409 `VISIT_CLOSED`.
+         */
+        post: operations["checkoutStoreVisit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dev/simulate-visit": {
         parameters: {
             query?: never;
@@ -762,6 +813,40 @@ export interface components {
             paymentStatus: components["schemas"]["PaymentStatus"] | null;
             /** @description Piezas totales que se llevó */
             itemCount: number;
+        };
+        /** @enum {string} */
+        VisitStatus: "ACTIVE" | "COMPLETED" | "ABANDONED";
+        StoreVisit: {
+            /** Format: uuid */
+            id: string;
+            customer: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            gateId: string;
+            status: components["schemas"]["VisitStatus"];
+            /** Format: date-time */
+            enteredAt: string;
+            /** Format: date-time */
+            exitedAt: string | null;
+        };
+        GateEntryRequest: {
+            /** @description Contenido del QR del cliente (JWT de `GET /me/entry-pass`) */
+            token: string;
+            /**
+             * @description Identificador de la puerta o del teléfono que escanea
+             * @default PUERTA-TELEFONO
+             */
+            gateId: string;
+        };
+        GateCheckoutRequest: {
+            /** @description Vacío = el cliente salió sin comprar */
+            items: {
+                productId?: string;
+                barcode?: string;
+                quantity: number;
+            }[];
         };
         Category: {
             /** Format: uuid */
@@ -1504,6 +1589,133 @@ export interface operations {
                 };
             };
             /** @description Visita ya cerrada con otro eventId (VISIT_CLOSED) o eventId de otra visita (EVENT_ID_CONFLICT) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listStoreVisits: {
+        parameters: {
+            query?: {
+                /** @description Por defecto ACTIVE */
+                status?: components["schemas"]["VisitStatus"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreVisit"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    admitStoreVisit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GateEntryRequest"];
+            };
+        };
+        responses: {
+            /** @description Visita creada */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoreEntryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Rol insuficiente o cuenta del cliente desactivada (ACCOUNT_DISABLED) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Token ya utilizado (ENTRY_TOKEN_REUSED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description QR inválido o expirado (INVALID_ENTRY_TOKEN) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    checkoutStoreVisit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GateCheckoutRequest"];
+            };
+        };
+        responses: {
+            /** @description Visita cerrada */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutWebhookResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Visita o producto desconocido (VISIT_NOT_FOUND, PRODUCT_NOT_FOUND) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description La visita ya estaba cerrada o abandonada (VISIT_CLOSED) */
             409: {
                 headers: {
                     [name: string]: unknown;

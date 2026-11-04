@@ -5,6 +5,7 @@ import type { ShelfEvent } from '../../domain/models/shelf-event'
 import { isLowStock, type Product } from '../../domain/models/product'
 import { itemCount, type Sale } from '../../domain/models/sale'
 import type { StoreSettings } from '../../domain/models/store-settings'
+import type { StoreVisitWithCustomer } from '../../domain/models/store-visit'
 import type { User } from '../../domain/models/user'
 
 // Modelos de dominio → forma exacta del contrato (fechas ISO, campos derivados, sin datos internos).
@@ -135,4 +136,13 @@ export const presentShelfEvent = (event: ShelfEvent) => ({
   capturedAt: event.capturedAt.toISOString(),
   createdAt: event.createdAt.toISOString(),
   resolvedAt: event.resolvedAt?.toISOString() ?? null,
+})
+
+export const presentStoreVisit = (visit: StoreVisitWithCustomer) => ({
+  id: visit.id,
+  customer: visit.customer,
+  gateId: visit.gateId,
+  status: visit.status,
+  enteredAt: visit.enteredAt.toISOString(),
+  exitedAt: visit.exitedAt?.toISOString() ?? null,
 })

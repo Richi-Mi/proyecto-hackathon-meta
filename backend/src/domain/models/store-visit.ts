@@ -11,3 +11,8 @@ export interface StoreVisit {
   /** `eventId` del webhook que cerró la visita (idempotencia, también sin venta) */
   exitEventId: string | null
 }
+
+/** Visita con el nombre del cliente, para la lista de la puerta del propietario */
+export interface StoreVisitWithCustomer extends StoreVisit {
+  customer: { id: string; name: string }
+}
