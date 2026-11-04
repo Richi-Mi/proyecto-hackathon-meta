@@ -63,6 +63,18 @@ export function createContainer(dataSource: DataSource, overrides: ContainerOver
   const shelfEvents = new TypeOrmShelfEventRepository(dataSource)
   const shelfVision = overrides.shelfVision ?? createShelfVision()
 
+  const store = new StoreUseCases(
+    users,
+    visits,
+    sales,
+    products,
+    entryPassSigner,
+    paymentGateway,
+    deviceKeys,
+    webhookSignatures,
+    { simulationCustomerEmail: env.SEED_CUSTOMER_EMAIL, entryPassTtlSeconds: env.ENTRY_PASS_TTL_SECONDS },
+  )
+
   return {
     repositories: { users, categories, products, sales },
     hasher,
@@ -79,23 +91,13 @@ export function createContainer(dataSource: DataSource, overrides: ContainerOver
       products: new ProductUseCases(products, categories, settings),
       inventory: new InventoryUseCases(inventory),
       sales: new SaleUseCases(sales, users, settings, paymentGateway),
-      store: new StoreUseCases(
-        users,
-        visits,
-        sales,
-        products,
-        entryPassSigner,
-        paymentGateway,
-        deviceKeys,
-        webhookSignatures,
-        { simulationCustomerEmail: env.SEED_CUSTOMER_EMAIL, entryPassTtlSeconds: env.ENTRY_PASS_TTL_SECONDS },
-      ),
-      reports: new ReportUseCases(reports),
-      settings: new SettingsUseCases(settings),
-      shelf: new ShelfUseCases(shelfEvents, products, inventory, shelfVision, {
+      store,
+      shelf: new ShelfUseCases(shelfEvents, products, inventory, shelfVision, visits, users, store, {
         autoApplyConfidence: env.SHELF_AUTO_APPLY_CONFIDENCE,
         maxAutoQuantity: env.SHELF_MAX_AUTO_QUANTITY,
       }),
+      reports: new ReportUseCases(reports),
+      settings: new SettingsUseCases(settings),
     },
     checkDatabase: () => dataSource.query('SELECT 1').then(
       () => true,

@@ -43,6 +43,11 @@ export type ShelfReviewReason = Schemas['ShelfReviewReason']
 export type ShelfEventCreateRequest = Schemas['ShelfEventCreateRequest']
 export type ShelfEventConfirmRequest = Schemas['ShelfEventConfirmRequest']
 export type ShelfVisionStatus = Schemas['ShelfVisionStatus']
+export type StoreEntryResponse = Schemas['StoreEntryResponse']
+export type VisitCart = Schemas['VisitCart']
+export type CurrentVisit = Schemas['CurrentVisit']
+export type VisitCheckout = Schemas['VisitCheckout']
+export type ProductIdentification = Schemas['ProductIdentification']
 
 export interface Paginated<T> {
   data: T[]

@@ -27,4 +27,7 @@ export interface StoreVisitRepository {
   complete(closing: VisitClosing): Promise<void>
   findById(id: string): Promise<StoreVisit | null>
   findByExitEventId(exitEventId: string): Promise<StoreVisit | null>
+  /** La visita ACTIVE más reciente de cualquier cliente (ShelfSight asume un cliente a la vez frente a la repisa) */
+  findLatestActive(): Promise<StoreVisit | null>
+  findActiveByUser(userId: string): Promise<StoreVisit | null>
 }

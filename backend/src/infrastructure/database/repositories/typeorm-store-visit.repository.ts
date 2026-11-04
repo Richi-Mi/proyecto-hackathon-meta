@@ -43,6 +43,18 @@ export class TypeOrmStoreVisitRepository implements StoreVisitRepository {
     const visit = await this.dataSource.getRepository(StoreVisitEntity).findOneBy({ exitEventId })
     return visit ? toVisit(visit) : null
   }
+
+  async findLatestActive(): Promise<StoreVisit | null> {
+    const visit = await this.dataSource
+      .getRepository(StoreVisitEntity)
+      .findOne({ where: { status: VisitStatus.ACTIVE }, order: { enteredAt: 'DESC' } })
+    return visit ? toVisit(visit) : null
+  }
+
+  async findActiveByUser(userId: string): Promise<StoreVisit | null> {
+    const visit = await this.dataSource.getRepository(StoreVisitEntity).findOneBy({ userId, status: VisitStatus.ACTIVE })
+    return visit ? toVisit(visit) : null
+  }
 }
 
 /**

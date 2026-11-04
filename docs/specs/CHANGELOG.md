@@ -1,5 +1,16 @@
 # Changelog del contrato (`openapi.yaml`)
 
+## 1.0.9 — 2026-11-04
+
+ShelfSight + Smart Store: la cámara de repisa alimenta el carrito del cliente que está dentro. Sin cambios incompatibles.
+
+- **`POST /shelf-events`**: si hay una visita ACTIVE (se toma la más reciente: un cliente a la vez frente a la repisa), lo que sale de la repisa va al **carrito de la visita** (evento `APPLIED` con `visitId`, sin movimiento de inventario) y lo que regresa se descuenta del carrito; si regresan más piezas de las que llevaba → `PENDING_REVIEW` con `NOT_IN_CART`. Sin visita, sigue siendo movimiento de inventario. `ShelfEvent.visitId` nuevo.
+- **`GET /me/visit`** y **`POST /me/visit/checkout`** (CUSTOMER): el cliente ve su carrito en vivo y al salir se genera la venta AUTOMATED y se cobra (mismo flujo que el webhook; idempotente con `eventId = cart-<visitId>`).
+- **`GET /shelf/visit`** y **`POST /shelf/visit/checkout`** (OWNER): el dueño ve al cliente dentro y puede cobrar su salida.
+- **`POST /store/door-entry`** (OWNER): puerta con la cámara del panel; igual que `/store/entry` sin `X-Device-Key`.
+- **`POST /products/identify`** (OWNER): la caja reconoce un producto con una foto. 422 `VISION_UNAVAILABLE` / `VISION_ERROR`.
+- ERD: `shelf_events.visit_id`.
+
 ## 1.0.8 — 2026-11-04
 
 ShelfSight: cámara de repisa. Rutas nuevas (tag **Shelf**, solo OWNER); sin cambios incompatibles.

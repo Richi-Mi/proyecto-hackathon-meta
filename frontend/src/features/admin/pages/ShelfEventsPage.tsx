@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { fetchShelfEvents, fetchShelfVisionStatus } from '../api'
 import { KpiCard } from '../components/KpiCard'
 import { describeShelfEvent, SHELF_REVIEW_REASON, SHELF_STATUS } from '../shelf/shelf-labels'
+import { CurrentVisitCard } from '../shelf/CurrentVisitCard'
 import { ShelfEventDialog } from '../shelf/ShelfEventDialog'
 
 const PAGE_SIZE = 20
@@ -49,6 +50,7 @@ export function ShelfEventsPage() {
 
   return (
     <div className="grid gap-6">
+      <CurrentVisitCard onCheckout={refresh} />
       <div className="grid gap-4 sm:grid-cols-3">
         <KpiCard
           label="Por revisar"
@@ -138,6 +140,7 @@ export function ShelfEventsPage() {
                 <div className="truncate font-medium">{describeShelfEvent(event)}</div>
                 <div className="truncate text-xs text-muted-foreground">
                   {formatDateTime(event.capturedAt)} · {event.cameraId}
+                  {event.visitId && ' · carrito del cliente'}
                   {event.confidence !== null && ` · confianza ${Math.round(event.confidence * 100)} %`}
                   {event.reviewReason && ` · ${SHELF_REVIEW_REASON[event.reviewReason]}`}
                 </div>

@@ -21,6 +21,7 @@ export const SHELF_REVIEW_REASON: Record<ShelfReviewReason, string> = {
   LOW_CONFIDENCE: 'Confianza baja',
   QUANTITY_TOO_HIGH: 'Muchas piezas en un solo evento',
   INSUFFICIENT_STOCK: 'No hay suficiente stock registrado',
+  NOT_IN_CART: 'Regresaron más piezas de las que llevaba el cliente',
 }
 
 /** "−2 Coca-Cola 600 ml" / "+12 Sabritas" */

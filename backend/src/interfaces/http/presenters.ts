@@ -1,6 +1,7 @@
 import type { Page } from '../../application/common/pagination'
 import type { Category } from '../../domain/models/category'
 import type { InventoryMovement } from '../../domain/models/inventory'
+import type { VisitCart } from '../../application/shelf/shelf.use-cases'
 import type { ShelfEvent } from '../../domain/models/shelf-event'
 import { isLowStock, type Product } from '../../domain/models/product'
 import { itemCount, type Sale } from '../../domain/models/sale'
@@ -132,7 +133,10 @@ export const presentShelfEvent = (event: ShelfEvent) => ({
   model: event.model,
   changeRatio: event.changeRatio,
   movementId: event.movementId,
+  visitId: event.visitId,
   capturedAt: event.capturedAt.toISOString(),
   createdAt: event.createdAt.toISOString(),
   resolvedAt: event.resolvedAt?.toISOString() ?? null,
 })
+
+export const presentVisitCart = (cart: VisitCart) => ({ ...cart, enteredAt: cart.enteredAt.toISOString() })

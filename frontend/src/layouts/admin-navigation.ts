@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, ReceiptText, ScanBarcode, ScanEye, Settings, Smartphone, type LucideIcon } from 'lucide-react'
+import { DoorOpen, LayoutDashboard, Package, ReceiptText, ScanBarcode, ScanEye, Settings, Smartphone, type LucideIcon } from 'lucide-react'
 import { matchPath } from 'react-router'
 
 export interface AdminNavItem {
@@ -22,7 +22,8 @@ export const ADMIN_NAVIGATION: { label: string; items: AdminNavItem[] }[] = [
     label: 'ShelfSight',
     items: [
       { to: '/admin/shelf', label: 'Repisa en vivo', icon: ScanEye },
-      { to: '/admin/camera', label: 'Cámara', icon: Smartphone },
+      { to: '/admin/camera', label: 'Cámara de repisa', icon: Smartphone },
+      { to: '/admin/door', label: 'Puerta (QR)', icon: DoorOpen },
     ],
   },
   {

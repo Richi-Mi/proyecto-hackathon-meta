@@ -20,6 +20,10 @@ import type {
   ShelfEventStatus,
   ShelfVisionStatus,
   SimulatedVisit,
+  CurrentVisit,
+  ProductIdentification,
+  StoreEntryResponse,
+  VisitCheckout,
   StockAdjustmentRequest,
   StoreSettings,
   StoreSettingsUpdate,
@@ -144,3 +148,16 @@ export const confirmShelfEvent = async (id: string, confirmation: ShelfEventConf
   (await adminApi.post<ShelfEvent>(`/shelf-events/${id}/confirm`, confirmation)).data
 
 export const rejectShelfEvent = async (id: string) => (await adminApi.post<ShelfEvent>(`/shelf-events/${id}/reject`)).data
+
+/** Cliente dentro de la tienda y su carrito */
+export const fetchCurrentVisit = async (signal?: AbortSignal) => (await adminApi.get<CurrentVisit>('/shelf/visit', { signal })).data
+
+export const checkoutCurrentVisit = async () => (await adminApi.post<VisitCheckout>('/shelf/visit/checkout', undefined, { timeout: 30_000 })).data
+
+/** Puerta: el QR leído con la cámara abre la visita del cliente */
+export const registerDoorEntry = async (token: string, gateId: string) =>
+  (await adminApi.post<StoreEntryResponse>('/store/door-entry', { token, gateId })).data
+
+/** Caja: reconoce un producto con una foto */
+export const identifyProduct = async (image: string) =>
+  (await adminApi.post<ProductIdentification>('/products/identify', { image }, { timeout: 90_000 })).data

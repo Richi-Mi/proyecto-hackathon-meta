@@ -1,12 +1,18 @@
-import { MovementType, ProductStatus, ShelfAction, ShelfEventStatus } from '../../domain/enums'
-import { ConflictError, InvalidInputError, NotFoundError } from '../../domain/errors'
+import { MovementType, ProductStatus, ShelfAction, ShelfEventStatus, VisitStatus } from '../../domain/enums'
+import { ConflictError, InvalidInputError, NotFoundError, UnprocessableError } from '../../domain/errors'
 import type { InventoryMovement } from '../../domain/models/inventory'
-import type { ShelfEvent, ShelfEventFrames, ShelfReviewReason } from '../../domain/models/shelf-event'
+import { roundMoney } from '../../domain/money'
+import type { Product } from '../../domain/models/product'
+import type { ShelfEvent, ShelfEventFrames, ShelfImage, ShelfReviewReason } from '../../domain/models/shelf-event'
+import type { StoreVisit } from '../../domain/models/store-visit'
 import type { Page, PageRequest } from '../common/pagination'
 import type { InventoryRepository } from '../ports/inventory-repository'
 import type { ProductRepository } from '../ports/product-repository'
 import type { NewShelfEvent, ShelfEventRepository } from '../ports/shelf-event-repository'
 import type { CatalogEntry, ShelfAnalysis, ShelfVisionAnalyzer } from '../ports/shelf-vision'
+import type { StoreVisitRepository } from '../ports/store-visit-repository'
+import type { UserRepository } from '../ports/user-repository'
+import type { CheckoutResult, StoreUseCases } from '../store/store.use-cases'
 
 export interface ShelfPolicy {
   /** Confianza mínima del modelo para aplicar el movimiento sin revisión */
@@ -28,12 +34,44 @@ export interface ShelfConfirmation {
   quantity: number
 }
 
+export interface VisitCartLine {
+  productId: string
+  name: string
+  quantity: number
+  /** IVA incluido */
+  unitPrice: number
+  subtotal: number
+}
+
+/** Cliente dentro de la tienda y lo que la cámara le ha visto tomar */
+export interface VisitCart {
+  visitId: string
+  enteredAt: Date
+  customer: { id: string; name: string }
+  items: VisitCartLine[]
+  itemCount: number
+  total: number
+}
+
+export interface VisitCheckout extends CheckoutResult {
+  items: VisitCartLine[]
+}
+
+export interface ProductIdentificationResult {
+  product: Product | null
+  confidence: number
+  reason: string
+  model: string | null
+}
+
 const CATALOG_LIMIT = 300
 const MAX_QUANTITY = 999
 
 /**
- * ShelfSight: convierte cada interacción con la repisa (foto antes/después) en un movimiento de inventario.
- * Si la visión no está segura, el evento va a la cola de revisión y el stock no cambia hasta que el dueño confirme.
+ * ShelfSight: convierte cada interacción con la repisa (foto antes/después) en un movimiento.
+ * - Con un cliente dentro de la tienda (visita ACTIVE), lo que sale de la repisa va a SU carrito y se cobra al salir.
+ * - Sin cliente, es un movimiento de inventario (resurtido o merma).
+ * Si la visión no está segura, el evento va a la cola de revisión y nada cambia hasta que el dueño confirme.
  */
 export class ShelfUseCases {
   constructor(
@@ -41,6 +79,9 @@ export class ShelfUseCases {
     private readonly products: ProductRepository,
     private readonly inventory: InventoryRepository,
     private readonly vision: ShelfVisionAnalyzer,
+    private readonly visits: StoreVisitRepository,
+    private readonly users: UserRepository,
+    private readonly store: StoreUseCases,
     private readonly policy: ShelfPolicy,
   ) {}
 
@@ -58,12 +99,15 @@ export class ShelfUseCases {
     if (Number.isNaN(capturedAt.getTime()) || capturedAt.getTime() > Date.now() + 5 * 60_000) {
       throw new InvalidInputError('INVALID_CAPTURED_AT', 'capturedAt no puede estar en el futuro')
     }
+    // ShelfSight asume un cliente a la vez frente a la repisa: el que entró más recientemente
+    const visit = await this.visits.findLatestActive()
     const base = {
       cameraId: input.cameraId.trim(),
       capturedAt,
       changeRatio: input.changeRatio ?? null,
       frames: input.frames,
       model: this.vision.model,
+      visitId: visit?.id ?? null,
     }
 
     if (!this.vision.enabled) {
@@ -77,8 +121,7 @@ export class ShelfUseCases {
     try {
       analysis = await this.vision.analyze(input.frames, catalog)
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      return this.events.create(pending(base, 'VISION_ERROR', `Falló el modelo de visión: ${message}`.slice(0, 1000)))
+      return this.events.create(pending(base, 'VISION_ERROR', `Falló el modelo de visión: ${errorMessage(error)}`.slice(0, 1000)))
     }
 
     const detected = {
@@ -98,7 +141,21 @@ export class ShelfUseCases {
       return this.events.create({ ...detected, status: ShelfEventStatus.PENDING_REVIEW, reviewReason })
     }
 
-    // Se guarda primero como pendiente: si el movimiento falla, el evento queda en revisión y el stock no cambió
+    // Cliente dentro: va a su carrito (el stock baja hasta que paga, como cualquier venta)
+    if (visit) {
+      if (await this.cartAccepts(visit.id, detected.productId!, detected.action, detected.quantity)) {
+        return this.events.create({
+          ...detected,
+          status: ShelfEventStatus.APPLIED,
+          reviewReason: null,
+          resolvedAt: new Date(),
+          resolvedBy: actorId,
+        })
+      }
+      return this.events.create({ ...detected, status: ShelfEventStatus.PENDING_REVIEW, reviewReason: 'NOT_IN_CART' })
+    }
+
+    // Sin cliente: movimiento de inventario. Se guarda primero como pendiente: si el movimiento falla, el stock no cambió
     const event = await this.events.create({ ...detected, status: ShelfEventStatus.PENDING_REVIEW, reviewReason: null })
     try {
       const movement = await this.applyMovement(event, detected.productId!, detected.action, detected.quantity, null)
@@ -112,7 +169,12 @@ export class ShelfUseCases {
     } catch (error) {
       const reason: ShelfReviewReason =
         error instanceof ConflictError && error.code === 'INSUFFICIENT_STOCK' ? 'INSUFFICIENT_STOCK' : 'UNKNOWN_PRODUCT'
-      return (await this.events.transition(event.id, [ShelfEventStatus.PENDING_REVIEW], { status: ShelfEventStatus.PENDING_REVIEW, reviewReason: reason })) ?? event
+      return (
+        (await this.events.transition(event.id, [ShelfEventStatus.PENDING_REVIEW], {
+          status: ShelfEventStatus.PENDING_REVIEW,
+          reviewReason: reason,
+        })) ?? event
+      )
     }
   }
 
@@ -126,13 +188,23 @@ export class ShelfUseCases {
     return { event, frames }
   }
 
-  /** El dueño confirma (o corrige) lo que pasó: se aplica el movimiento de inventario. */
+  /**
+   * El dueño confirma (o corrige) lo que pasó. Si el evento era de un cliente que sigue en la tienda, va a su carrito;
+   * si no (o es un resurtido que no estaba en el carrito), se aplica al inventario.
+   */
   async confirm(id: string, input: ShelfConfirmation, actorId: string): Promise<ShelfEvent> {
     if (input.quantity < 1 || input.quantity > MAX_QUANTITY) {
       throw new InvalidInputError('INVALID_QUANTITY', `La cantidad debe estar entre 1 y ${MAX_QUANTITY}`)
     }
     const event = await this.events.findById(id)
     if (!event) throw notFound(id)
+    if (!(await this.products.findById(input.productId))) {
+      throw new NotFoundError('PRODUCT_NOT_FOUND', `No existe el producto ${input.productId}`)
+    }
+
+    const visit = event.visitId ? await this.visits.findById(event.visitId) : null
+    const toCart =
+      visit?.status === VisitStatus.ACTIVE && (await this.cartAccepts(visit.id, input.productId, input.action, input.quantity))
 
     const claimed = await this.events.transition(id, [ShelfEventStatus.PENDING_REVIEW, ShelfEventStatus.NO_CHANGE], {
       status: ShelfEventStatus.APPLIED,
@@ -140,10 +212,12 @@ export class ShelfUseCases {
       productId: input.productId,
       quantity: input.quantity,
       reviewReason: null,
+      visitId: toCart ? visit!.id : null,
       resolvedBy: actorId,
       resolvedAt: new Date(),
     })
     if (!claimed) throw alreadyResolved(event)
+    if (toCart) return claimed
 
     try {
       const movement = await this.applyMovement(event, input.productId, input.action, input.quantity, actorId)
@@ -156,6 +230,7 @@ export class ShelfUseCases {
         productId: event.productId,
         quantity: event.quantity,
         reviewReason: event.reviewReason,
+        visitId: event.visitId,
         resolvedBy: null,
         resolvedAt: null,
       })
@@ -173,6 +248,99 @@ export class ShelfUseCases {
     })
     if (!rejected) throw alreadyResolved(event)
     return rejected
+  }
+
+  // ── Carrito de la visita ────────────────────────────────────────────────────
+
+  /** Para el dueño: el cliente que está frente a la repisa (el que entró más recientemente). */
+  async currentVisit(): Promise<VisitCart | null> {
+    const visit = await this.visits.findLatestActive()
+    return visit ? this.buildCart(visit) : null
+  }
+
+  /** Para el cliente: su visita activa y lo que lleva. */
+  async customerVisit(userId: string): Promise<VisitCart | null> {
+    const visit = await this.visits.findActiveByUser(userId)
+    return visit ? this.buildCart(visit) : null
+  }
+
+  /** El cliente sale: su carrito se vuelve una venta AUTOMATED y se cobra con su método guardado. */
+  async customerCheckout(userId: string): Promise<VisitCheckout> {
+    const visit = await this.visits.findActiveByUser(userId)
+    if (!visit) throw new NotFoundError('NO_ACTIVE_VISIT', 'No tienes una visita activa en la tienda')
+    return this.checkoutVisit(visit)
+  }
+
+  /** El dueño cobra la salida del cliente que está en la tienda (respaldo si el cliente no toca "Salir"). */
+  async checkoutCurrentVisit(): Promise<VisitCheckout> {
+    const visit = await this.visits.findLatestActive()
+    if (!visit) throw new NotFoundError('NO_ACTIVE_VISIT', 'No hay ningún cliente dentro de la tienda')
+    return this.checkoutVisit(visit)
+  }
+
+  /** Puerta: el dueño (laptop/teléfono en la entrada) lee el QR del cliente y abre su visita. */
+  doorEntry(input: { token: string; gateId: string }) {
+    return this.store.registerEntry(input)
+  }
+
+  // ── Caja: identificar un producto con una foto ──────────────────────────────
+
+  async identifyProduct(image: ShelfImage): Promise<ProductIdentificationResult> {
+    if (!this.vision.enabled) {
+      throw new UnprocessableError('VISION_UNAVAILABLE', 'No hay modelo de visión configurado (VISION_API_KEY)')
+    }
+    const catalog = await this.loadCatalog()
+    let result
+    try {
+      result = await this.vision.identify(image, catalog)
+    } catch (error) {
+      throw new UnprocessableError('VISION_ERROR', `Falló el modelo de visión: ${errorMessage(error)}`.slice(0, 500))
+    }
+    const productId = matchProduct(result.productId, catalog)
+    return {
+      product: productId ? await this.products.findById(productId) : null,
+      confidence: Math.min(1, Math.max(0, result.confidence)),
+      reason: result.reason.slice(0, 500),
+      model: this.vision.model,
+    }
+  }
+
+  private async checkoutVisit(visit: StoreVisit): Promise<VisitCheckout> {
+    const cart = await this.buildCart(visit)
+    const result = await this.store.checkout({
+      // Determinista: un doble toque en "Salir" no cobra dos veces
+      eventId: `cart-${visit.id}`,
+      visitId: visit.id,
+      exitedAt: new Date(),
+      items: cart.items.map((line) => ({ productId: line.productId, quantity: line.quantity })),
+    })
+    return { ...result, items: cart.items }
+  }
+
+  private async buildCart(visit: StoreVisit): Promise<VisitCart> {
+    const [quantities, customer] = await Promise.all([this.events.cart(visit.id), this.users.findById(visit.userId)])
+    const items: VisitCartLine[] = []
+    for (const [productId, quantity] of quantities) {
+      const product = await this.products.findById(productId)
+      if (!product) continue
+      items.push({ productId, name: product.name, quantity, unitPrice: product.price, subtotal: roundMoney(product.price * quantity) })
+    }
+    items.sort((a, b) => a.name.localeCompare(b.name, 'es'))
+    return {
+      visitId: visit.id,
+      enteredAt: visit.enteredAt,
+      customer: { id: visit.userId, name: customer?.name ?? 'Cliente' },
+      items,
+      itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
+      total: roundMoney(items.reduce((sum, line) => sum + line.subtotal, 0)),
+    }
+  }
+
+  /** Lo que sale siempre entra al carrito; lo que regresa solo si el cliente lo traía. */
+  private async cartAccepts(visitId: string, productId: string, action: ShelfAction, quantity: number): Promise<boolean> {
+    if (action === ShelfAction.REMOVED) return true
+    if (action !== ShelfAction.ADDED) return false
+    return ((await this.events.cart(visitId)).get(productId) ?? 0) >= quantity
   }
 
   private reviewReason(detected: { productId: string | null; confidence: number; quantity: number }): ShelfReviewReason | null {
@@ -218,7 +386,7 @@ export class ShelfUseCases {
   }
 }
 
-type EventBase = Pick<NewShelfEvent, 'cameraId' | 'capturedAt' | 'changeRatio' | 'frames' | 'model'>
+type EventBase = Pick<NewShelfEvent, 'cameraId' | 'capturedAt' | 'changeRatio' | 'frames' | 'model' | 'visitId'>
 
 const pending = (base: EventBase, reviewReason: ShelfReviewReason, note: string): NewShelfEvent => ({
   ...base,
@@ -230,6 +398,8 @@ const pending = (base: EventBase, reviewReason: ShelfReviewReason, note: string)
   reviewReason,
   note,
 })
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 const clampQuantity = (quantity: number) =>
   Number.isFinite(quantity) ? Math.min(MAX_QUANTITY, Math.max(0, Math.round(quantity))) : 0

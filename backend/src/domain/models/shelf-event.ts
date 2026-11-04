@@ -8,6 +8,8 @@ export const SHELF_REVIEW_REASONS = [
   'LOW_CONFIDENCE',
   'QUANTITY_TOO_HIGH',
   'INSUFFICIENT_STOCK',
+  /** Regresaron a la repisa más piezas de las que el cliente llevaba en su carrito */
+  'NOT_IN_CART',
 ] as const
 export type ShelfReviewReason = (typeof SHELF_REVIEW_REASONS)[number]
 
@@ -29,6 +31,8 @@ export interface ShelfEvent {
   /** Fracción de la imagen que cambió entre antes y después (detector de movimiento del teléfono) */
   changeRatio: number | null
   movementId: string | null
+  /** Visita (cliente dentro de la tienda) a cuyo carrito se aplicó el evento; null = movimiento de inventario */
+  visitId: string | null
   capturedAt: Date
   createdAt: Date
   resolvedAt: Date | null

@@ -16,6 +16,7 @@ erDiagram
     PRODUCTS |o--o{ SHELF_EVENTS : "detectado en"
     SHELF_EVENTS |o--o| INVENTORY_MOVEMENTS : "aplica"
     USERS |o--o{ SHELF_EVENTS : "revisa"
+    STORE_VISITS |o--o{ SHELF_EVENTS : "carrito"
 
     SHELF_EVENTS {
         uuid id PK
@@ -30,6 +31,7 @@ erDiagram
         varchar model "nullable"
         numeric change_ratio "nullable"
         uuid movement_id FK "nullable"
+        uuid visit_id FK "nullable, carrito de la visita"
         varchar image_mime_type
         bytea before_image
         bytea after_image

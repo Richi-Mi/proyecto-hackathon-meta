@@ -1,4 +1,9 @@
-import type { CatalogEntry, ShelfAnalysis, ShelfVisionAnalyzer } from '../../application/ports/shelf-vision'
+import type {
+  CatalogEntry,
+  ProductIdentification,
+  ShelfAnalysis,
+  ShelfVisionAnalyzer,
+} from '../../application/ports/shelf-vision'
 import { ShelfAction } from '../../domain/enums'
 import type { ShelfEventFrames, ShelfImage } from '../../domain/models/shelf-event'
 
@@ -30,6 +35,14 @@ Reglas:
 Responde SOLO con un objeto JSON, sin texto extra:
 {"action":"REMOVED|ADDED|MOVED|NONE","productId":"<id del catálogo o null>","quantity":<entero >= 0>,"confidence":<0-1>,"reason":"<frase>"}`
 
+const IDENTIFY_PROMPT = `Eres el lector de productos de la caja de una tienda de abarrotes en México (ShelfSight).
+Recibes UNA foto de un producto que alguien acerca a la cámara, en lugar de pasarlo por el lector de código de barras.
+Di cuál producto del catálogo es, fijándote en la marca, el sabor, la presentación y el tamaño (600 ml no es 1 L).
+- "productId" DEBE ser exactamente uno de los "id" del catálogo, o null si no está en el catálogo o no se distingue.
+- "confidence" de 0 a 1; si dudas entre dos presentaciones, usa menos de 0.6.
+- "reason": una frase corta en español.
+Responde SOLO con un objeto JSON: {"productId":"<id o null>","confidence":<0-1>,"reason":"<frase>"}`
+
 const ACTIONS = new Set<string>(Object.values(ShelfAction))
 
 export class OpenAiCompatibleShelfVision implements ShelfVisionAnalyzer {
@@ -41,6 +54,30 @@ export class OpenAiCompatibleShelfVision implements ShelfVisionAnalyzer {
   }
 
   async analyze(frames: ShelfEventFrames, catalog: CatalogEntry[]): Promise<ShelfAnalysis> {
+    const content = await this.complete(SYSTEM_PROMPT, [
+      { type: 'text', text: `Catálogo de la tienda (JSON):\n${JSON.stringify(catalog)}` },
+      { type: 'text', text: 'Foto ANTES:' },
+      { type: 'image_url', image_url: { url: toDataUrl(frames.before) } },
+      { type: 'text', text: 'Foto DESPUÉS:' },
+      { type: 'image_url', image_url: { url: toDataUrl(frames.after) } },
+    ])
+    return parseAnalysis(content)
+  }
+
+  async identify(image: ShelfImage, catalog: CatalogEntry[]): Promise<ProductIdentification> {
+    const content = await this.complete(IDENTIFY_PROMPT, [
+      { type: 'text', text: `Catálogo de la tienda (JSON):\n${JSON.stringify(catalog)}` },
+      { type: 'image_url', image_url: { url: toDataUrl(image) } },
+    ])
+    const raw = extractJson(content)
+    return {
+      productId: cleanId(raw.productId),
+      confidence: Number(raw.confidence ?? 0) || 0,
+      reason: typeof raw.reason === 'string' ? raw.reason : '',
+    }
+  }
+
+  private async complete(system: string, userContent: unknown[]): Promise<string> {
     const body = {
       model: this.config.model,
       temperature: 0,
@@ -48,17 +85,8 @@ export class OpenAiCompatibleShelfVision implements ShelfVisionAnalyzer {
       max_tokens: 4096,
       ...(this.config.jsonMode && { response_format: { type: 'json_object' } }),
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: `Catálogo de la tienda (JSON):\n${JSON.stringify(catalog)}` },
-            { type: 'text', text: 'Foto ANTES:' },
-            { type: 'image_url', image_url: { url: toDataUrl(frames.before) } },
-            { type: 'text', text: 'Foto DESPUÉS:' },
-            { type: 'image_url', image_url: { url: toDataUrl(frames.after) } },
-          ],
-        },
+        { role: 'system', content: system },
+        { role: 'user', content: userContent },
       ],
     }
 
@@ -76,7 +104,7 @@ export class OpenAiCompatibleShelfVision implements ShelfVisionAnalyzer {
     const choice = payload.choices?.[0]
     const content = choice?.message?.content
     if (!content) throw new Error(`El modelo no devolvió contenido (finish_reason: ${choice?.finish_reason ?? 'desconocido'})`)
-    return parseAnalysis(content)
+    return content
   }
 }
 
@@ -88,27 +116,35 @@ export class DisabledShelfVision implements ShelfVisionAnalyzer {
   analyze(): Promise<ShelfAnalysis> {
     return Promise.reject(new Error('Visión no configurada'))
   }
+
+  identify(): Promise<ProductIdentification> {
+    return Promise.reject(new Error('Visión no configurada'))
+  }
 }
 
 const toDataUrl = (image: ShelfImage) => `data:${image.mimeType};base64,${Buffer.from(image.data).toString('base64')}`
 
 /** Acepta el JSON aunque venga rodeado de texto o de un bloque ```json. */
-export function parseAnalysis(content: string): ShelfAnalysis {
+function extractJson(content: string): Record<string, unknown> {
   const start = content.indexOf('{')
   const end = content.lastIndexOf('}')
   if (start === -1 || end <= start) throw new Error(`Respuesta sin JSON: ${content.slice(0, 200)}`)
-  let raw: Record<string, unknown>
   try {
-    raw = JSON.parse(content.slice(start, end + 1)) as Record<string, unknown>
+    return JSON.parse(content.slice(start, end + 1)) as Record<string, unknown>
   } catch {
     throw new Error(`JSON inválido del modelo: ${content.slice(0, 200)}`)
   }
+}
 
+const cleanId = (value: unknown) =>
+  typeof value === 'string' && value.trim() && value.trim().toLowerCase() !== 'null' ? value.trim() : null
+
+export function parseAnalysis(content: string): ShelfAnalysis {
+  const raw = extractJson(content)
   const action = String(raw.action ?? '').toUpperCase()
-  const productId = typeof raw.productId === 'string' && raw.productId.trim() && raw.productId !== 'null' ? raw.productId.trim() : null
   return {
     action: ACTIONS.has(action) ? (action as ShelfAction) : ShelfAction.NONE,
-    productId,
+    productId: cleanId(raw.productId),
     quantity: Number(raw.quantity ?? 0) || 0,
     confidence: Number(raw.confidence ?? 0) || 0,
     reason: typeof raw.reason === 'string' ? raw.reason : '',

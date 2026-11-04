@@ -104,6 +104,7 @@ export const router = createBrowserRouter([
                     path: 'shelf',
                     lazy: lazyPage(() => import('@/features/admin/pages/ShelfEventsPage'), (m) => m.ShelfEventsPage),
                   },
+                  { path: 'door', lazy: lazyPage(() => import('@/features/admin/pages/DoorPage'), (m) => m.DoorPage) },
                   { path: 'camera', lazy: lazyPage(() => import('@/features/admin/pages/CameraPage'), (m) => m.CameraPage) },
                   { path: 'settings', lazy: lazyPage(() => import('@/features/admin/pages/SettingsPage'), (m) => m.SettingsPage) },
                 ],

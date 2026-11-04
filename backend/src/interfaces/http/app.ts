@@ -82,7 +82,7 @@ export function createApp({ useCases, checkDatabase, config }: AppDependencies) 
         documentation: {
           info: {
             title: 'Smart Abarrotes API',
-            version: '1.0.8',
+            version: '1.0.9',
             description:
               'Endpoints implementados. El contrato completo (fuente de verdad SDD) está en docs/specs/openapi.yaml.',
           },

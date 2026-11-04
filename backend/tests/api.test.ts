@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import type { RefundRequest } from '../src/application/ports/payment-gateway'
-import type { ShelfAnalysis, ShelfVisionAnalyzer } from '../src/application/ports/shelf-vision'
+import type { ProductIdentification, ShelfAnalysis, ShelfVisionAnalyzer } from '../src/application/ports/shelf-vision'
 import { ShelfAction } from '../src/domain/enums'
 import { createContainer } from '../src/container'
 import { env, parseList } from '../src/infrastructure/config/env'
@@ -31,9 +31,16 @@ class FakeShelfVision implements ShelfVisionAnalyzer {
   readonly model = 'fake-vision'
   next: ShelfAnalysis | Error = { action: ShelfAction.NONE, productId: null, quantity: 0, confidence: 1, reason: '' }
 
+  nextIdentification: ProductIdentification | Error = { productId: null, confidence: 0, reason: '' }
+
   async analyze() {
     if (this.next instanceof Error) throw this.next
     return this.next
+  }
+
+  async identify() {
+    if (this.nextIdentification instanceof Error) throw this.nextIdentification
+    return this.nextIdentification
   }
 }
 
@@ -1184,6 +1191,8 @@ describe('ShelfSight (/shelf-events)', () => {
   const post = () => call('POST', '/api/v1/shelf-events', { token: ownerToken, body: frames })
 
   beforeAll(async () => {
+    // Las pruebas del flujo automático pueden dejar visitas abiertas: aquí nadie está en la tienda
+    await AppDataSource.query(`UPDATE store_visits SET status = 'ABANDONED', exited_at = now() WHERE status = 'ACTIVE'`)
     const created = await call('POST', '/api/v1/products', {
       token: ownerToken,
       body: { id: 'SHELF-COCA', name: 'Coca-Cola 600 ml (repisa)', categoryId, price: 20, purchaseCost: 12, initialStock: 10 },
@@ -1300,6 +1309,79 @@ describe('ShelfSight (/shelf-events)', () => {
     const notImage = `data:image/jpeg;base64,${Buffer.alloc(200, 7).toString('base64')}`
     const bad = await call('POST', '/api/v1/shelf-events', { token: ownerToken, body: { ...frames, afterImage: notImage } })
     expect([bad.status, bad.body.error.code]).toEqual([400, 'INVALID_IMAGE'])
+  })
+
+  test('cliente dentro: lo que toma va a su carrito y se cobra al salir', async () => {
+    await call('POST', '/api/v1/products/SHELF-COCA/stock-adjustments', { token: ownerToken, body: { type: 'RESTOCK', quantity: 9 } })
+    const before = await stock()
+
+    expect((await call('GET', '/api/v1/me/visit', { token: customerToken })).body).toEqual({ visit: null })
+    const pass = await call('GET', '/api/v1/me/entry-pass', { token: customerToken })
+    const door = await call('POST', '/api/v1/store/door-entry', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
+    expect(door.status).toBe(201)
+    const reused = await call('POST', '/api/v1/store/door-entry', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
+    expect([reused.status, reused.body.error.code]).toEqual([409, 'ENTRY_TOKEN_REUSED'])
+
+    sees({ quantity: 2 })
+    const taken = await post()
+    expect(taken.body).toMatchObject({ status: 'APPLIED', visitId: door.body.visitId, movementId: null })
+    sees({ action: ShelfAction.ADDED, quantity: 1 })
+    expect((await post()).body).toMatchObject({ status: 'APPLIED', visitId: door.body.visitId })
+    sees({ action: ShelfAction.ADDED, quantity: 3 })
+    expect((await post()).body).toMatchObject({ status: 'PENDING_REVIEW', reviewReason: 'NOT_IN_CART' })
+    expect(await stock()).toBe(before) // el stock baja hasta que paga
+
+    const mine = await call('GET', '/api/v1/me/visit', { token: customerToken })
+    expect(mine.body.visit).toMatchObject({
+      visitId: door.body.visitId,
+      itemCount: 1,
+      total: 20,
+      items: [{ productId: 'SHELF-COCA', quantity: 1, unitPrice: 20, subtotal: 20 }],
+    })
+    const owner = await call('GET', '/api/v1/shelf/visit', { token: ownerToken })
+    expect(owner.body.visit).toMatchObject({ visitId: door.body.visitId, customer: { id: customerId }, itemCount: 1 })
+
+    const checkout = await call('POST', '/api/v1/me/visit/checkout', { token: customerToken })
+    expect(checkout.status).toBe(200)
+    expect(checkout.body).toMatchObject({ visitId: door.body.visitId, totalAmount: 20, paymentStatus: 'PAID', items: [{ quantity: 1 }] })
+    expect(checkout.body.folio).toBeNumber()
+    expect(await stock()).toBe(before - 1)
+
+    expect((await call('GET', '/api/v1/me/visit', { token: customerToken })).body).toEqual({ visit: null })
+    const again = await call('POST', '/api/v1/me/visit/checkout', { token: customerToken })
+    expect([again.status, again.body.error.code]).toEqual([404, 'NO_ACTIVE_VISIT'])
+    const ownerCheckout = await call('POST', '/api/v1/shelf/visit/checkout', { token: ownerToken })
+    expect([ownerCheckout.status, ownerCheckout.body.error.code]).toEqual([404, 'NO_ACTIVE_VISIT'])
+  })
+
+  test('el dueño puede cobrar la salida; un evento revisado se va al carrito si el cliente sigue dentro', async () => {
+    const pass = await call('GET', '/api/v1/me/entry-pass', { token: customerToken })
+    await call('POST', '/api/v1/store/door-entry', { token: ownerToken, body: { token: pass.body.token, gateId: 'PUERTA' } })
+    sees({ confidence: 0.3 })
+    const doubtful = await post()
+    expect(doubtful.body.status).toBe('PENDING_REVIEW')
+    const confirmed = await call('POST', `/api/v1/shelf-events/${doubtful.body.id}/confirm`, {
+      token: ownerToken,
+      body: { action: 'REMOVED', productId: 'SHELF-COCA', quantity: 2 },
+    })
+    expect(confirmed.body).toMatchObject({ status: 'APPLIED', visitId: doubtful.body.visitId, movementId: null })
+
+    const checkout = await call('POST', '/api/v1/shelf/visit/checkout', { token: ownerToken })
+    expect(checkout.body).toMatchObject({ totalAmount: 40, items: [{ productId: 'SHELF-COCA', quantity: 2 }] })
+  })
+
+  test('caja: identificar un producto con una foto', async () => {
+    shelfVision.nextIdentification = { productId: 'shelf-coca', confidence: 0.9, reason: 'Botella roja de 600 ml' }
+    const found = await call('POST', '/api/v1/products/identify', { token: ownerToken, body: { image: jpeg } })
+    expect(found.status).toBe(200)
+    expect(found.body).toMatchObject({ product: { id: 'SHELF-COCA', price: 20 }, confidence: 0.9, model: 'fake-vision' })
+
+    shelfVision.nextIdentification = { productId: null, confidence: 0.2, reason: 'No se distingue' }
+    expect((await call('POST', '/api/v1/products/identify', { token: ownerToken, body: { image: jpeg } })).body.product).toBeNull()
+
+    shelfVision.nextIdentification = new Error('HTTP 500')
+    const failed = await call('POST', '/api/v1/products/identify', { token: ownerToken, body: { image: jpeg } })
+    expect([failed.status, failed.body.error.code]).toEqual([422, 'VISION_ERROR'])
   })
 })
 

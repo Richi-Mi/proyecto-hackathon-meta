@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSession } from '@/features/auth/session-store'
+import { MyVisitCard } from '../components/MyVisitCard'
 import { useEntryPass, useNow } from '../use-entry-pass'
 
 const QR_SIZE = 232
@@ -26,6 +27,8 @@ export function EntryPassPage() {
         <p className="text-sm text-muted-foreground">Hola{firstName ? `, ${firstName}` : ''} 👋</p>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Tu pase de entrada</h1>
       </div>
+
+      <MyVisitCard />
 
       <Card className="items-center gap-5 px-6 py-7">
         <div className="relative grid size-[264px] place-items-center rounded-3xl bg-white p-4 shadow-sm ring-1 ring-border">

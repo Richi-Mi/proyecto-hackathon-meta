@@ -4,9 +4,13 @@ import { Role } from '../../../domain/enums'
 import { InvalidInputError } from '../../../domain/errors'
 import type { ShelfImage } from '../../../domain/models/shelf-event'
 import type { AuthPlugin } from '../plugins/auth.plugin'
-import { presentPage, presentShelfEvent } from '../presenters'
+import { presentPage, presentProduct, presentShelfEvent, presentVisitCart } from '../presenters'
 import { errors, paginated } from '../schemas/common.schema'
+import { StoreEntryRequest, StoreEntryResponseSchema } from '../schemas/store.schema'
 import {
+  CurrentVisitSchema,
+  ProductIdentificationSchema,
+  ProductIdentifyRequest,
   ShelfEventConfirmRequest,
   ShelfEventCreateRequest,
   ShelfEventDetailSchema,
@@ -14,6 +18,7 @@ import {
   ShelfEventParams,
   ShelfEventSchema,
   ShelfVisionStatusSchema,
+  VisitCheckoutSchema,
 } from '../schemas/shelf.schema'
 
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024
@@ -91,7 +96,64 @@ export const shelfRoutes = (auth: AuthPlugin, useCases: ShelfUseCases) =>
             response: { 200: ShelfEventSchema, ...errors(400, 401, 403, 404, 409) },
             detail: { summary: 'El dueño descarta el evento (el stock no cambia)', operationId: 'rejectShelfEvent' },
           },
+        )
+        .get('/shelf/visit', async () => {
+          const cart = await useCases.currentVisit()
+          return { visit: cart ? presentVisitCart(cart) : null }
+        }, {
+          response: { 200: CurrentVisitSchema, ...errors(401, 403) },
+          detail: { summary: 'Cliente dentro de la tienda y su carrito (lo que la cámara le vio tomar)', operationId: 'getCurrentStoreVisit' },
+        })
+        .post('/shelf/visit/checkout', () => useCases.checkoutCurrentVisit(), {
+          response: { 200: VisitCheckoutSchema, ...errors(401, 403, 404, 409) },
+          detail: { summary: 'El dueño cobra la salida del cliente que está en la tienda', operationId: 'checkoutCurrentStoreVisit' },
+        })
+        .post(
+          '/store/door-entry',
+          async ({ body, status }) => {
+            const entry = await useCases.doorEntry(body)
+            return status(201, { ...entry, enteredAt: entry.enteredAt.toISOString() })
+          },
+          {
+            body: StoreEntryRequest,
+            response: { 201: StoreEntryResponseSchema, ...errors(400, 401, 403, 409) },
+            detail: {
+              tags: ['Store Devices'],
+              summary: 'Puerta operada por el dueño: lee el QR del cliente con la cámara y abre su visita',
+              operationId: 'registerDoorEntry',
+            },
+          },
+        )
+        .post(
+          '/products/identify',
+          async ({ body }) => {
+            const result = await useCases.identifyProduct(decodeImage(body.image, 'image'))
+            return { ...result, product: result.product ? presentProduct(result.product) : null }
+          },
+          {
+            body: ProductIdentifyRequest,
+            response: { 200: ProductIdentificationSchema, ...errors(400, 401, 403, 422) },
+            detail: {
+              tags: ['Products'],
+              summary: 'Caja: identifica un producto con una foto (en lugar del lector de código de barras)',
+              operationId: 'identifyProduct',
+            },
+          },
         ),
+    )
+    .guard({ auth: [Role.CUSTOMER], detail: { tags: ['Customer'] } }, (app) =>
+      app
+        .get('/me/visit', async ({ auth }) => {
+          const cart = await useCases.customerVisit(auth.userId)
+          return { visit: cart ? presentVisitCart(cart) : null }
+        }, {
+          response: { 200: CurrentVisitSchema, ...errors(401, 403) },
+          detail: { summary: 'Mi visita activa y lo que llevo en el carrito', operationId: 'getMyVisit' },
+        })
+        .post('/me/visit/checkout', ({ auth }) => useCases.customerCheckout(auth.userId), {
+          response: { 200: VisitCheckoutSchema, ...errors(401, 403, 404, 409) },
+          detail: { summary: 'Salgo de la tienda: se cobra mi carrito con mi método guardado', operationId: 'checkoutMyVisit' },
+        }),
     )
 
 const DATA_URL = /^data:(image\/(?:jpeg|png|webp));base64,/

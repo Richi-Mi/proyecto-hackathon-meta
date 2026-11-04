@@ -58,6 +58,18 @@ export class TypeOrmShelfEventRepository implements ShelfEventRepository {
     return { data: data.map(toShelfEvent), meta: { page, limit, total } }
   }
 
+  async cart(visitId: string): Promise<Map<string, number>> {
+    const rows = await this.dataSource.query<{ productId: string; quantity: string }[]>(
+      `SELECT product_id AS "productId",
+              sum(CASE WHEN action = 'REMOVED' THEN quantity ELSE -quantity END) AS quantity
+       FROM shelf_events
+       WHERE visit_id = $1 AND status = 'APPLIED' AND product_id IS NOT NULL AND action IN ('REMOVED', 'ADDED')
+       GROUP BY product_id`,
+      [visitId],
+    )
+    return new Map(rows.filter((row) => Number(row.quantity) > 0).map((row) => [row.productId, Number(row.quantity)]))
+  }
+
   async transition(id: string, from: ShelfEventStatus[], changes: ShelfEventResolution): Promise<ShelfEvent | null> {
     const result = await this.repository.update({ id, status: In(from) }, changes)
     if (!result.affected) return null
@@ -80,6 +92,7 @@ function toShelfEvent(entity: ShelfEventEntity): ShelfEvent {
     model: entity.model,
     changeRatio: entity.changeRatio,
     movementId: entity.movementId,
+    visitId: entity.visitId,
     capturedAt: entity.capturedAt,
     createdAt: entity.createdAt,
     resolvedAt: entity.resolvedAt,

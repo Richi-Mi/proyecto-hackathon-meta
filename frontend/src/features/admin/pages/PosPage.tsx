@@ -8,6 +8,7 @@ import { CashDialog } from '../pos/CashDialog'
 import { CatalogGrid, QUICK_ACCESS } from '../pos/CatalogGrid'
 import { cartTotals, usePosCart } from '../pos/pos-cart-store'
 import { ReceiptDialog } from '../pos/ReceiptDialog'
+import { IdentifyProductButton } from '../pos/IdentifyProductDialog'
 import { ScannerInput } from '../pos/ScannerInput'
 import { TicketPanel, type PaymentMethod } from '../pos/TicketPanel'
 
@@ -83,7 +84,12 @@ export function PosPage() {
   return (
     <div className="grid gap-4 lg:h-[calc(100dvh-7rem)] lg:grid-cols-[1fr_minmax(22rem,26rem)]">
       <section className="grid min-h-0 grid-rows-[auto_1fr] gap-4" aria-label="Catálogo">
-        <ScannerInput inputRef={scannerRef} value={query} onChange={setQuery} catalog={products ?? []} onProduct={addToTicket} />
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-1">
+            <ScannerInput inputRef={scannerRef} value={query} onChange={setQuery} catalog={products ?? []} onProduct={addToTicket} />
+          </div>
+          <IdentifyProductButton onProduct={addToTicket} />
+        </div>
         <CatalogGrid
           categories={categories.data ?? []}
           products={visible}

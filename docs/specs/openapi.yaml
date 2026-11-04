@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Smart Abarrotes API
-  version: 1.0.8
+  version: 1.0.9
   description: Backend del sistema híbrido Smart Store (cobro automatizado por cámaras) + POS manual.
 servers:
   - url: http://localhost:3000/api/v1
@@ -863,6 +863,113 @@ paths:
         '404': { description: SHELF_EVENT_NOT_FOUND, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: SHELF_EVENT_RESOLVED, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /shelf/visit:
+    get:
+      operationId: getCurrentStoreVisit
+      tags: [Shelf]
+      summary: Cliente dentro de la tienda y su carrito (lo que la cámara le vio tomar)
+      description: La visita ACTIVE más reciente; ShelfSight asume un cliente a la vez frente a la repisa. `visit` es null si no hay nadie.
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentVisit' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /shelf/visit/checkout:
+    post:
+      operationId: checkoutCurrentStoreVisit
+      tags: [Shelf]
+      summary: El dueño cobra la salida del cliente que está en la tienda
+      description: Respaldo de `POST /me/visit/checkout`. Mismo resultado que el webhook de salida, con las partidas del carrito.
+      security: [{ bearerAuth: [OWNER] }]
+      responses:
+        '200':
+          description: Visita cerrada (con venta si el carrito tenía piezas)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VisitCheckout' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'NO_ACTIVE_VISIT | PRODUCT_NOT_FOUND', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'VISIT_CLOSED | EVENT_ID_CONFLICT', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /store/door-entry:
+    post:
+      operationId: registerDoorEntry
+      tags: [Store Devices]
+      summary: 'Puerta operada por el dueño: lee el QR del cliente con la cámara y abre su visita'
+      description: Igual que `POST /store/entry`, pero autenticado con la sesión del dueño en lugar de `X-Device-Key` (la puerta es una laptop o teléfono con el panel abierto).
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoreEntryRequest' }
+      responses:
+        '201':
+          description: Visita abierta
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StoreEntryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { description: 'No autenticado | INVALID_ENTRY_TOKEN', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: 'Rol insuficiente | ACCOUNT_DISABLED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'ENTRY_TOKEN_REUSED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /products/identify:
+    post:
+      operationId: identifyProduct
+      tags: [Products]
+      summary: 'Caja: identifica un producto con una foto (en lugar del lector de código de barras)'
+      security: [{ bearerAuth: [OWNER] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductIdentifyRequest' }
+      responses:
+        '200':
+          description: Resultado; `product` es null si no lo reconoció
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductIdentification' }
+        '400': { description: 'VALIDATION_ERROR | INVALID_IMAGE', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: 'VISION_UNAVAILABLE | VISION_ERROR', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /me/visit:
+    get:
+      operationId: getMyVisit
+      tags: [Customer]
+      summary: Mi visita activa y lo que llevo en el carrito
+      security: [{ bearerAuth: [CUSTOMER] }]
+      responses:
+        '200':
+          description: OK; `visit` es null si no estoy en la tienda
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentVisit' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /me/visit/checkout:
+    post:
+      operationId: checkoutMyVisit
+      tags: [Customer]
+      summary: 'Salgo de la tienda: se cobra mi carrito con mi método guardado'
+      description: Idempotente por visita (un doble toque no cobra dos veces). Sin piezas, cierra la visita sin venta.
+      security: [{ bearerAuth: [CUSTOMER] }]
+      responses:
+        '200':
+          description: Visita cerrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VisitCheckout' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'NO_ACTIVE_VISIT | PRODUCT_NOT_FOUND', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'VISIT_CLOSED | EVENT_ID_CONFLICT', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1358,7 +1465,7 @@ components:
 
     ShelfEventStatus: { type: string, enum: [APPLIED, PENDING_REVIEW, NO_CHANGE, REJECTED] }
     ShelfAction: { type: string, enum: [REMOVED, ADDED, MOVED, NONE] }
-    ShelfReviewReason: { type: string, enum: [VISION_UNAVAILABLE, VISION_ERROR, UNKNOWN_PRODUCT, LOW_CONFIDENCE, QUANTITY_TOO_HIGH, INSUFFICIENT_STOCK] }
+    ShelfReviewReason: { type: string, enum: [VISION_UNAVAILABLE, VISION_ERROR, UNKNOWN_PRODUCT, LOW_CONFIDENCE, QUANTITY_TOO_HIGH, INSUFFICIENT_STOCK, NOT_IN_CART] }
     ShelfEventCreateRequest:
       type: object
       required: [cameraId, beforeImage, afterImage]
@@ -1370,7 +1477,7 @@ components:
         afterImage: { type: string, minLength: 100, maxLength: 4200000, description: 'JPEG/PNG/WebP como data URL o base64; máx. 3 MB' }
     ShelfEvent:
       type: object
-      required: [id, cameraId, status, action, product, quantity, confidence, reviewReason, note, model, changeRatio, movementId, capturedAt, createdAt, resolvedAt]
+      required: [id, cameraId, status, action, product, quantity, confidence, reviewReason, note, model, changeRatio, movementId, visitId, capturedAt, createdAt, resolvedAt]
       properties:
         id: { type: string, format: uuid }
         cameraId: { type: string }
@@ -1392,6 +1499,7 @@ components:
         model: { type: [string, 'null'] }
         changeRatio: { type: [number, 'null'], minimum: 0, maximum: 1 }
         movementId: { type: [string, 'null'], format: uuid }
+        visitId: { type: [string, 'null'], format: uuid, description: 'Visita a cuyo carrito se aplicó; null = movimiento de inventario' }
         capturedAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         resolvedAt: { type: [string, 'null'], format: date-time }
@@ -1418,3 +1526,58 @@ components:
         model: { type: [string, 'null'] }
         autoApplyConfidence: { type: number, minimum: 0, maximum: 1 }
         maxAutoQuantity: { type: integer, minimum: 1 }
+    VisitCartLine:
+      type: object
+      required: [productId, name, quantity, unitPrice, subtotal]
+      properties:
+        productId: { type: string }
+        name: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        unitPrice: { $ref: '#/components/schemas/Money', description: IVA incluido }
+        subtotal: { $ref: '#/components/schemas/Money' }
+    VisitCart:
+      type: object
+      required: [visitId, enteredAt, customer, items, itemCount, total]
+      properties:
+        visitId: { type: string, format: uuid }
+        enteredAt: { type: string, format: date-time }
+        customer:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        items: { type: array, items: { $ref: '#/components/schemas/VisitCartLine' } }
+        itemCount: { type: integer, minimum: 0 }
+        total: { $ref: '#/components/schemas/Money' }
+    CurrentVisit:
+      type: object
+      required: [visit]
+      properties:
+        visit:
+          oneOf:
+            - { $ref: '#/components/schemas/VisitCart' }
+            - { type: 'null' }
+    VisitCheckout:
+      allOf:
+        - { $ref: '#/components/schemas/CheckoutWebhookResponse' }
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/VisitCartLine' } }
+    ProductIdentifyRequest:
+      type: object
+      required: [image]
+      properties:
+        image: { type: string, minLength: 100, maxLength: 4200000, description: 'JPEG/PNG/WebP como data URL o base64; máx. 3 MB' }
+    ProductIdentification:
+      type: object
+      required: [product, confidence, reason, model]
+      properties:
+        product:
+          oneOf:
+            - { $ref: '#/components/schemas/Product' }
+            - { type: 'null' }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        reason: { type: string }
+        model: { type: [string, 'null'] }
